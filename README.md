@@ -243,6 +243,40 @@ Treat every subscription URL as a credential. Do not paste it into an issue, scr
 
 The Worker cannot measure the path between your ISP and Cloudflare. Run the scanner on the device or network that will use the tunnel, then import the result into `/admin`.
 
+#### Windows: select low-latency addresses with CloudflareSpeedTest HTTPing
+
+The third-party open-source tool [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest) can measure HTTP latency from the current network to Cloudflare edge addresses. Re_edgetunnel does not bundle, host, or remotely execute this scanner. Download the build for your operating system and architecture from its [official Releases](https://github.com/XIU2/CloudflareSpeedTest/releases).
+
+Run the following PowerShell command in the directory containing `cfst.exe` and `ip.txt`. Replace the example hostname with your own Worker hostname and use only a public HTTPS root URL. Never put a subscription token, administration path, or other credential in `-url`.
+
+```powershell
+.\cfst.exe -f ip.txt -tp 443 -httping -url https://worker.example.com/ -n 50 -p 30 -dd -o result-httping.csv
+```
+
+| Option | Purpose in this example |
+| --- | --- |
+| `-f ip.txt` | Reads Cloudflare IP addresses or CIDR ranges from `ip.txt` |
+| `-tp 443` | Tests the standard HTTPS port `443` |
+| `-httping` | Measures latency with the HTTP/HTTPS URL instead of the default TCPing mode |
+| `-url https://worker.example.com/` | Uses your Worker hostname to validate TLS, HTTP status, and Cloudflare routing |
+| `-n 50` | Uses 50 latency-test workers; this is concurrency, not the number of displayed IPs |
+| `-p 30` | Prints the first 30 sorted results in the terminal |
+| `-dd` | Disables download testing and sorts the result by average latency |
+| `-o result-httping.csv` | Writes the complete result to a CSV file in the current directory |
+
+The displayed available count means only that HTTPing completed without a timeout and returned an accepted status code. It does not mean every address is suitable. Prefer results with `0.00` packet loss, low average latency, and stable repeated runs. Because this command includes `-dd`, a download-speed value of `0.00 MB/s` is expected and is not a failed latency test.
+
+Add `-tlr 0` to exclude every result with packet loss. Add a filter such as `-cfcolo SIN,HKG,NRT` to limit the output to selected Cloudflare locations. HTTPing is still network scanning, so keep concurrency moderate and avoid repeated high-frequency runs. Disable the system proxy, or explicitly make CFST bypass it, so the result represents the client network rather than a proxy route.
+
+`result-httping.csv` is the raw CFST CSV. The current console import box accepts one normalized address per line rather than the complete CSV. Select the useful rows, convert them as shown below, and paste them into the Preferred IP page under `/admin`:
+
+```text
+CFST CSV:      104.18.46.92,4,4,0.00,54.65,0.00,SIN
+Console line:  104.18.46.92:443#SIN,54.65ms
+```
+
+The address above illustrates field conversion only; it is not a universal recommendation. After importing it, generate a Clash or share link and test connection success, throughput, and peak-hour stability in the real client. A single HTTPing ranking is not a substitute for an end-to-end tunnel test.
+
 Accepted import lines:
 
 ```text

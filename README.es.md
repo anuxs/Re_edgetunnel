@@ -243,6 +243,40 @@ Trata cada URL de suscripción como una credencial. No la publiques en incidenci
 
 El Worker no puede medir la ruta entre tu ISP y Cloudflare. Ejecuta el escáner en el dispositivo o red que usará el túnel e importa después los resultados en `/admin`.
 
+#### Windows: filtrar direcciones de baja latencia con HTTPing de CloudflareSpeedTest
+
+La herramienta externa y de código abierto [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest) permite medir la latencia HTTP entre la red actual y las direcciones del borde de Cloudflare. Re_edgetunnel no incluye, aloja ni ejecuta remotamente este escáner. Descarga la versión correspondiente a tu sistema y arquitectura desde sus [Releases oficiales](https://github.com/XIU2/CloudflareSpeedTest/releases).
+
+Ejecuta el siguiente comando de PowerShell en la carpeta que contiene `cfst.exe` e `ip.txt`. Sustituye el hostname de ejemplo por el de tu propio Worker y utiliza únicamente la raíz HTTPS pública. No incluyas tokens de suscripción, rutas de administración ni otras credenciales en `-url`.
+
+```powershell
+.\cfst.exe -f ip.txt -tp 443 -httping -url https://worker.example.com/ -n 50 -p 30 -dd -o result-httping.csv
+```
+
+| Opción | Función en este ejemplo |
+| --- | --- |
+| `-f ip.txt` | Lee direcciones IP o rangos CIDR de Cloudflare desde `ip.txt` |
+| `-tp 443` | Prueba el puerto HTTPS habitual `443` |
+| `-httping` | Mide la latencia mediante la URL HTTP/HTTPS en lugar del modo TCPing predeterminado |
+| `-url https://worker.example.com/` | Usa el hostname de tu Worker para validar TLS, el estado HTTP y el enrutamiento de Cloudflare |
+| `-n 50` | Usa 50 procesos de prueba de latencia; es la concurrencia, no la cantidad de IP mostradas |
+| `-p 30` | Muestra en la terminal los primeros 30 resultados ordenados |
+| `-dd` | Desactiva la prueba de descarga y ordena por latencia media |
+| `-o result-httping.csv` | Guarda el resultado completo en un CSV del directorio actual |
+
+El contador de direcciones disponibles solo indica que HTTPing terminó sin agotar el tiempo y recibió un código de estado aceptado. No significa que todas sean adecuadas. Prioriza una pérdida de paquetes de `0.00`, una latencia media baja y resultados estables en varias ejecuciones. Como el comando incluye `-dd`, es normal que la velocidad de descarga sea `0.00 MB/s`; no indica un fallo de la medición de latencia.
+
+Añade `-tlr 0` para excluir cualquier resultado con pérdida de paquetes. Añade un filtro como `-cfcolo SIN,HKG,NRT` para limitar la salida a determinadas ubicaciones de Cloudflare. HTTPing sigue siendo un escaneo de red: mantén una concurrencia moderada y evita ejecuciones repetidas a alta frecuencia. Desactiva el proxy del sistema, o configura CFST para no usarlo, para que la medición represente la red del cliente.
+
+`result-httping.csv` es el CSV original de CFST. El cuadro de importación actual acepta una dirección normalizada por línea, no el CSV completo. Selecciona las filas útiles, conviértelas como se muestra y pégalas en la página de IP preferidas de `/admin`:
+
+```text
+CSV de CFST:       104.18.46.92,4,4,0.00,54.65,0.00,SIN
+Línea del panel:   104.18.46.92:443#SIN,54.65ms
+```
+
+La dirección anterior solo demuestra la conversión de campos; no es una recomendación universal. Después de importarla, genera un enlace de Clash o compartible y comprueba en el cliente real la conexión, el rendimiento y la estabilidad en horas punta. Una clasificación HTTPing aislada no sustituye una prueba completa del túnel.
+
 Formatos admitidos, uno por línea:
 
 ```text

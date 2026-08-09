@@ -243,6 +243,40 @@ https://tunnel.example.com/login
 
 Worker 无法测量你当前运营商到 Cloudflare 的线路。扫描器必须运行在真正使用该节点的设备或网络中，然后把结果导入 `/admin`。
 
+#### Windows：使用 CloudflareSpeedTest 做 HTTPing 延迟筛选
+
+可以使用第三方开源工具 [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest) 测试当前网络到 Cloudflare 边缘地址的 HTTP 延迟。Re_edgetunnel 不捆绑、托管或远程执行该扫描器；请从其[官方 Releases](https://github.com/XIU2/CloudflareSpeedTest/releases)下载与你系统架构匹配的版本。
+
+在 `cfst.exe` 与 `ip.txt` 所在目录运行下面的 PowerShell 命令。把示例域名替换成你自己的 Worker 域名，只使用公开的 HTTPS 根地址；不要把订阅 Token、管理路径或其他凭据放进 `-url`。
+
+```powershell
+.\cfst.exe -f ip.txt -tp 443 -httping -url https://worker.example.com/ -n 50 -p 30 -dd -o result-httping.csv
+```
+
+| 参数 | 在本示例中的作用 |
+| --- | --- |
+| `-f ip.txt` | 从 `ip.txt` 读取待测 Cloudflare IP 或 CIDR 段 |
+| `-tp 443` | 使用 HTTPS 常用的 `443` 端口 |
+| `-httping` | 使用 `-url` 指定的 HTTP/HTTPS 请求测量延迟，而不是默认 TCPing |
+| `-url https://worker.example.com/` | 使用你自己的 Worker 域名完成 TLS、HTTP 状态码和 Cloudflare 路由验证 |
+| `-n 50` | 使用 50 个延迟测速线程；这是并发数，不是输出 IP 数量 |
+| `-p 30` | 在终端显示排序后的前 30 条结果 |
+| `-dd` | 禁用下载测速，结果按平均延迟排序 |
+| `-o result-httping.csv` | 把完整结果写入当前目录的 CSV 文件 |
+
+输出中的“可用”只表示 HTTPing 没有超时并返回了可接受的状态码，不表示这些 IP 全部适合作为节点。优先查看丢包率为 `0.00`、平均延迟较低并且多次复测稳定的结果。因为命令包含 `-dd`，下载速度列显示 `0.00 MB/s` 是预期行为，不是测速失败。
+
+如果希望直接排除任何丢包，可以追加 `-tlr 0`；如果只想查看特定 Cloudflare 机房，可以追加类似 `-cfcolo SIN,HKG,NRT` 的过滤条件。HTTPing 也属于网络扫描，请保持适度并发，避免高频重复运行。测速时应关闭系统代理或确保 CFST 直连，否则测到的可能是代理线路。
+
+`result-httping.csv` 是 CFST 的原始 CSV，当前控制台导入框接收的是每行一个地址的格式，而不是整份 CSV。挑选结果后按下面方式转换并粘贴到 `/admin` 的“优选 IP”页面：
+
+```text
+CFST CSV:    104.18.46.92,4,4,0.00,54.65,0.00,SIN
+控制台格式: 104.18.46.92:443#SIN,54.65ms
+```
+
+上面的地址只用于说明字段转换，不代表它在其他运营商、地区或时间段仍然最优。导入后选择该地址生成 Clash 或分享链接，再用真实客户端复测连接、吞吐与晚高峰稳定性；一次 HTTPing 排名不能替代实际隧道测试。
+
 支持的每行格式：
 
 ```text
