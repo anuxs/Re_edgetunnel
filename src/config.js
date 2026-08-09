@@ -2,7 +2,8 @@
 import { MD5MD5, maskSensitiveInfo, buildProxyUri, buildShadowsocksUri, normalizeProxyProtocol, normalizeTransport } from './utils/helpers.js';
 import { generateRandomIP, organizeToArray, getCloudflareUsage } from './utils/ip.js';
 
-export async function readConfig(env, hostname, userID, path, reset = false) {
+export async function readConfig(env, hostname, userID, path, reset = false, options = {}) {
+    const { includeUsage = true } = options;
     const host = hostname;
     const CM_DoH = env.ECH_DOH_URL || null;
     const initStartTime = performance.now();
@@ -204,14 +205,16 @@ export async function readConfig(env, hostname, userID, path, reset = false) {
         } else {
             const cf = JSON.parse(cfStr);
             if (cf.UsageAPI && env.ALLOW_REMOTE_USAGE_API === 'true') {
-                try {
-                    const usageUrl = new URL(cf.UsageAPI);
-                    if (usageUrl.protocol !== 'https:' || usageUrl.username || usageUrl.password) throw new Error('UsageAPI must be an HTTPS URL without credentials');
-                    const response = await fetch(usageUrl);
-                    if (!response.ok) throw new Error(`UsageAPI returned ${response.status}`);
-                    config_JSON.CF.Usage = await response.json();
-                } catch (err) {
-                    console.error(`请求 CF_JSON.UsageAPI 失败: ${err.message}`);
+                if (includeUsage) {
+                    try {
+                        const usageUrl = new URL(cf.UsageAPI);
+                        if (usageUrl.protocol !== 'https:' || usageUrl.username || usageUrl.password) throw new Error('UsageAPI must be an HTTPS URL without credentials');
+                        const response = await fetch(usageUrl);
+                        if (!response.ok) throw new Error(`UsageAPI returned ${response.status}`);
+                        config_JSON.CF.Usage = await response.json();
+                    } catch (err) {
+                        console.error(`请求 CF_JSON.UsageAPI 失败: ${err.message}`);
+                    }
                 }
             } else {
                 config_JSON.CF.Email = cf.Email || null;
@@ -219,7 +222,9 @@ export async function readConfig(env, hostname, userID, path, reset = false) {
                 config_JSON.CF.AccountID = cf.AccountID ? maskSensitiveInfo(cf.AccountID) : null;
                 config_JSON.CF.APIToken = cf.APIToken ? maskSensitiveInfo(cf.APIToken) : null;
                 config_JSON.CF.UsageAPI = null;
-                config_JSON.CF.Usage = await getCloudflareUsage(cf.Email, cf.GlobalAPIKey, cf.AccountID, cf.APIToken);
+                if (includeUsage) {
+                    config_JSON.CF.Usage = await getCloudflareUsage(cf.Email, cf.GlobalAPIKey, cf.AccountID, cf.APIToken);
+                }
             }
         }
     } catch (e) {

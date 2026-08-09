@@ -4,7 +4,7 @@ import { buildProxyUri, MD5MD5 } from '../src/utils/helpers.js';
 import { readConfig } from '../src/config.js';
 
 class MemoryKV {
-    constructor() { this.values = new Map(); }
+    constructor(values = []) { this.values = new Map(values); }
     async get(key) { return this.values.get(key) ?? null; }
     async put(key, value) { this.values.set(key, value); }
 }
@@ -23,6 +23,33 @@ test('default configuration initializes and never generates ech=null', async () 
     assert.equal(config.LINKS.length, 7);
     assert.match(config.LINKS.at(-1), /^ss:\/\//);
     assert.deepEqual(config.客户端DNS, []);
+});
+
+test('subscription config can skip optional Cloudflare usage requests', async () => {
+    const kv = new MemoryKV([
+        ['cf.json', JSON.stringify({ UsageAPI: 'https://usage.example/status' })],
+    ]);
+    const originalFetch = globalThis.fetch;
+    let requests = 0;
+    globalThis.fetch = async () => {
+        requests += 1;
+        throw new Error('usage fetch should be skipped');
+    };
+
+    try {
+        await readConfig(
+            { KV: kv, ALLOW_REMOTE_USAGE_API: 'true' },
+            'worker.example',
+            '00000000-0000-4000-8000-000000000000',
+            '/sub',
+            false,
+            { includeUsage: false },
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+
+    assert.equal(requests, 0);
 });
 
 test('VLESS and Trojan links use protocol-appropriate parameters', () => {

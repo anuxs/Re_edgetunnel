@@ -62,7 +62,7 @@ export default {
             if (adminPassword) {
                 let proxyConfig = createProxyConfig();
 
-                const proxyMatch = pathLower.match(/\/(proxyip[.=]|pyip=|ip=)(.+)/);
+                const proxyMatch = path.match(/(?:^|\/)(proxyip[.=]|pyip=|ip=)([^/?#]+)/i);
                 if (url.searchParams.has('proxyip')) {
                     const p = url.searchParams.get('proxyip');
                     proxyConfig.proxyIP = p.includes(',') ? p.split(',')[Math.floor(Math.random() * p.split(',').length)] : p;
@@ -133,7 +133,7 @@ export default {
                 if (url.searchParams.get('token') !== expectedToken) {
                     return new Response(JSON.stringify({ success: false, msg: 'Invalid Token' }), { status: 403, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
                 }
-                const config = await readConfig(env, url.hostname, userID, path);
+                const config = await readConfig(env, url.hostname, userID, path, false, { includeUsage: false });
                 return handleSub(request, env, config, ctx);
             }
             if (pathLower === 'locations') {
