@@ -1,9 +1,28 @@
-name = "example-clash-sub"
+name = "edgetunnel-clash-sub"
 main = "index.js"
 compatibility_date = "2026-08-09"
+
+# Copy this template to wrangler.local.toml before adding your own account,
+# Worker name, custom domain, or other deployment-specific values.
+# routes = [
+#     { pattern = "clash.example.com", custom_domain = true }
+# ]
 
 [observability]
 enabled = true
 
 [observability.logs]
 head_sampling_rate = 0.1
+
+[vars]
+# Replace this in your ignored wrangler.local.toml with the hostname of the
+# separately deployed tunnel Worker. Do not include https:// or a path.
+CLOUDFLARE_HOST = "edgetunnel.example.com"
+
+# Keep [] for a subscription containing only this project's Cloudflare nodes.
+# If custom nodes contain credentials, remove this variable and store
+# NODES_JSON with `wrangler secret put NODES_JSON` instead.
+NODES_JSON = "[]"
+
+# Required secrets, configured interactively after the first deployment:
+# SECRET_TOKEN, PAGE_PASSWORD, CLOUDFLARE_UUID

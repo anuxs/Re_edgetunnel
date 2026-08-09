@@ -119,11 +119,19 @@ npx wrangler whoami
 
 ### 第 4 步：创建并绑定独立 KV
 
+先复制一份只在本机使用的部署配置。`wrangler.local.toml` 已被 Git
+忽略，因此 KV ID、自定义域名和可选的 Cloudflare Account ID 不会被提交：
+
+```bash
+cp wrangler.toml wrangler.local.toml
+# PowerShell：Copy-Item wrangler.toml wrangler.local.toml
+```
+
 ```bash
 npx wrangler kv namespace create KV
 ```
 
-命令成功后会输出 KV ID。打开 `wrangler.toml`，替换占位符：
+命令成功后会输出 KV ID。打开 `wrangler.local.toml`，替换占位符：
 
 ```toml
 [[kv_namespaces]]
@@ -140,8 +148,8 @@ id = "把刚才获得的-KV-ID-粘贴到这里"
 ```bash
 npm test
 npm run check
-npx wrangler deploy --dry-run
-npx wrangler deploy
+npx wrangler deploy --dry-run --config wrangler.local.toml
+npx wrangler deploy --config wrangler.local.toml
 ```
 
 首次部署用于创建 Worker。在还没有配置 `ADMIN` 时，HTTP 请求会返回 `503 Administrator password is not configured.`，这是主动保护，不是程序崩溃。
@@ -157,7 +165,7 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'
 然后通过交互方式保存为 Cloudflare Secret：
 
 ```bash
-npx wrangler secret put ADMIN
+npx wrangler secret put ADMIN --config wrangler.local.toml
 ```
 
 按照提示粘贴密码。不要把真实密码写进源码、README 或 `wrangler.toml`。`secret put` 会创建并立即部署一个新版本。
@@ -173,7 +181,7 @@ node -e "console.log(require('node:crypto').randomUUID())"
 保存为 Secret：
 
 ```bash
-npx wrangler secret put UUID
+npx wrangler secret put UUID --config wrangler.local.toml
 ```
 
 `ADMIN` 和 `UUID` 必须使用两个不同的值。更换 UUID 后，旧节点和旧订阅里的凭据会立即失效。
@@ -181,7 +189,7 @@ npx wrangler secret put UUID
 确认两个 Secret 名称已经存在：
 
 ```bash
-npx wrangler secret list
+npx wrangler secret list --config wrangler.local.toml
 ```
 
 Cloudflare 只会显示 Secret 名称，不会回显内容。
@@ -245,6 +253,17 @@ https://你的域名/sub?token=你的TOKEN
 | Loon | `/sub?token=TOKEN&loon` | 必须配置自建 `SUBAPI` 和 `SUBCONFIG` |
 
 Mihomo、Sing-box、Surge 等是客户端配置格式，不是 Worker 新增的入站网络协议。没有配置自建转换器时，转换请求会明确返回 HTTP 501，不会偷偷调用公共转换站。
+
+## 可选：独立的 Clash 订阅 Worker
+
+仓库还提供一个可选的配套 Worker，可直接生成带密码保护的 Mihomo/Clash
+YAML 和分享链接，不需要使用公共订阅转换站。它需要单独部署，并显式填写你自己的
+Tunnel 域名及 Cloudflare Secrets。
+
+完整的通用部署步骤见
+[workers/clash-sub/README.zh-CN.md](workers/clash-sub/README.zh-CN.md)。Cloudflare
+Account ID、KV ID、自定义域名、UUID、密码和订阅 Token 只能放在被 Git 忽略的
+本地配置或 Cloudflare Secrets 中，不要把任何账户专用 Wrangler 文件提交到仓库。
 
 ## 当前管理页的使用方法
 

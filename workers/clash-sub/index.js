@@ -1,8 +1,8 @@
 const textEncoder = new TextEncoder();
 
-export const CLOUDFLARE_HOST = 'edgetunnel.example.eu';
 export const CLOUDFLARE_PATH = '/tunnel';
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+const HOSTNAME_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
 const CLOUDFLARE_NODE_NAMES = new Set([
     'cloudflare-vless-ws',
     'cloudflare-vless-xhttp',
@@ -21,6 +21,19 @@ const NO_STORE_HEADERS = {
 export function normalizeUuidCredential(value) {
     if (typeof value !== 'string') return '';
     return value.trim().replace(/^\uFEFF+/, '').trim().toLowerCase();
+}
+
+export function normalizeCloudflareHost(value) {
+    const host = (typeof value === 'string' ? value : '')
+        .trim()
+        .replace(/^\uFEFF+/, '')
+        .trim()
+        .toLowerCase()
+        .replace(/\.$/, '');
+    if (!HOSTNAME_PATTERN.test(host)) {
+        throw new Error('CLOUDFLARE_HOST must be a valid hostname');
+    }
+    return host;
 }
 
 function response(body, status = 200, headers = {}) {
@@ -78,21 +91,22 @@ function base64(value) {
     return btoa(binary);
 }
 
-export function cloudflareNodes(uuidInput) {
+export function cloudflareNodes(uuidInput, hostInput) {
     const uuid = normalizeUuidCredential(uuidInput);
     if (!UUID_PATTERN.test(uuid)) throw new Error('CLOUDFLARE_UUID must be a canonical version-4 UUID');
+    const host = normalizeCloudflareHost(hostInput);
     const common = {
-        server: CLOUDFLARE_HOST,
+        server: host,
         port: 443,
         uuid,
-        sni: CLOUDFLARE_HOST,
+        sni: host,
         fingerprint: 'chrome',
         skipCertVerify: false,
         udp: false,
         wsPath: CLOUDFLARE_PATH,
-        wsHost: CLOUDFLARE_HOST,
+        wsHost: host,
         xhttpPath: CLOUDFLARE_PATH,
-        xhttpHost: CLOUDFLARE_HOST,
+        xhttpHost: host,
         xhttpMode: 'stream-one',
         grpcServiceName: 'tunnel',
     };
@@ -106,7 +120,7 @@ export function cloudflareNodes(uuidInput) {
         {
             name: 'cloudflare-shadowsocks-ws',
             type: 'ss',
-            server: CLOUDFLARE_HOST,
+            server: host,
             port: 443,
             method: 'aes-128-gcm',
             password: uuid,
@@ -114,7 +128,7 @@ export function cloudflareNodes(uuidInput) {
             plugin: 'v2ray-plugin',
             pluginMode: 'websocket',
             pluginTls: true,
-            pluginHost: CLOUDFLARE_HOST,
+            pluginHost: host,
             pluginPath: `${CLOUDFLARE_PATH}?enc=aes-128-gcm`,
             pluginMux: false,
         },
@@ -136,7 +150,7 @@ function validateNode(node) {
 }
 
 export function loadConfig(env) {
-    const required = ['SECRET_TOKEN', 'PAGE_PASSWORD', 'NODES_JSON', 'CLOUDFLARE_UUID'];
+    const required = ['SECRET_TOKEN', 'PAGE_PASSWORD', 'NODES_JSON', 'CLOUDFLARE_UUID', 'CLOUDFLARE_HOST'];
     const missing = required.filter((key) => !env[key]);
     if (missing.length) throw new Error(`Missing Worker secrets: ${missing.join(', ')}`);
 
@@ -150,7 +164,7 @@ export function loadConfig(env) {
 
     const retainedNodes = originalNodes.filter((node) =>
         !isUpCloudNode(node) && !CLOUDFLARE_NODE_NAMES.has(node?.name));
-    const nodes = [...retainedNodes, ...cloudflareNodes(env.CLOUDFLARE_UUID)];
+    const nodes = [...retainedNodes, ...cloudflareNodes(env.CLOUDFLARE_UUID, env.CLOUDFLARE_HOST)];
     const names = new Set();
     for (const node of nodes) {
         validateNode(node);

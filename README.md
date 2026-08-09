@@ -120,13 +120,21 @@ The first command opens a browser authorization page. The second command confirm
 
 ### 4. Create and bind a dedicated KV namespace
 
+First create a private deployment file. It is ignored by Git, so your KV ID,
+custom domain, and optional Cloudflare account ID are not committed:
+
+```bash
+cp wrangler.toml wrangler.local.toml
+# PowerShell: Copy-Item wrangler.toml wrangler.local.toml
+```
+
 Create a namespace:
 
 ```bash
 npx wrangler kv namespace create KV
 ```
 
-Wrangler prints an ID. Open `wrangler.toml` and replace the placeholder:
+Wrangler prints an ID. Open `wrangler.local.toml` and replace the placeholder:
 
 ```toml
 [[kv_namespaces]]
@@ -150,8 +158,8 @@ npm run check
 Perform a deployment dry run, then deploy:
 
 ```bash
-npx wrangler deploy --dry-run
-npx wrangler deploy
+npx wrangler deploy --dry-run --config wrangler.local.toml
+npx wrangler deploy --config wrangler.local.toml
 ```
 
 The first deployment creates the Worker. Until `ADMIN` is configured, HTTP requests intentionally return `503 Administrator password is not configured.`
@@ -167,7 +175,7 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'
 Store it interactively. Do not put the value in source code or `wrangler.toml`.
 
 ```bash
-npx wrangler secret put ADMIN
+npx wrangler secret put ADMIN --config wrangler.local.toml
 ```
 
 Wrangler prompts for the value without requiring it in the command line. `secret put` creates and immediately deploys a new Worker version.
@@ -183,7 +191,7 @@ node -e "console.log(require('node:crypto').randomUUID())"
 Store it as a secret:
 
 ```bash
-npx wrangler secret put UUID
+npx wrangler secret put UUID --config wrangler.local.toml
 ```
 
 Use different values for `ADMIN` and `UUID`. Rotating `UUID` immediately invalidates old node links and subscriptions.
@@ -191,7 +199,7 @@ Use different values for `ADMIN` and `UUID`. Rotating `UUID` immediately invalid
 Confirm that both secret names exist:
 
 ```bash
-npx wrangler secret list
+npx wrangler secret list --config wrangler.local.toml
 ```
 
 Cloudflare displays secret names, not their values.
@@ -249,6 +257,19 @@ Treat the subscription URL as a password. Anyone who has it can retrieve the gen
 | Loon conversion | `/sub?token=TOKEN&loon` | Operator-owned `SUBAPI` and `SUBCONFIG` |
 
 Mihomo, Sing-box, Surge, Quantumult X, and Loon are **client configuration formats**, not additional Worker inbound protocols. If conversion is not configured, the Worker returns HTTP 501 instead of silently contacting a public converter.
+
+## Optional standalone Clash subscription Worker
+
+The repository also includes an optional companion Worker that generates a
+password-protected Mihomo/Clash YAML file and share links directly, without a
+public subscription converter. It is a separate deployment and must be
+configured with your own tunnel hostname and Cloudflare secrets.
+
+Follow the complete generic guide in
+[workers/clash-sub/README.md](workers/clash-sub/README.md). Keep account IDs,
+KV IDs, custom domains, UUIDs, passwords, and subscription tokens in ignored
+local configuration or Cloudflare Secrets; never add a per-account Wrangler
+file to the repository.
 
 ## Using the current administrator page
 

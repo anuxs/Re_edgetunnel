@@ -89,85 +89,90 @@ async function handleHttpTunnel(request, credential, proxyConfig, grpc) {
     const remote = { socket: null };
     let bridge;
     const response = new ReadableStream({
-        async start(controller) {
+        start(controller) {
             bridge = createResponseBridge(controller, grpc ? encodeGrpcHunk : null);
-            try {
-                let responseHeader = handshake.responseHeader;
-                const trojanUdpDecoder = handshake.protocol === 'trojan' && handshake.isUDP
-                    ? new TrojanUdpDecoder()
-                    : null;
-                const forwardUdp = async (data) => {
-                    if (!trojanUdpDecoder) {
-                        await forwardDataUDP(data, bridge, responseHeader, proxyConfig.dnsResolver);
+            // Resolve start() immediately so Cloudflare can commit the response
+            // while the request upload and remote TCP download proceed together.
+            // Awaiting the whole session here deadlocks stream-one clients, which
+            // keep the request body open until they begin receiving a response.
+            void (async () => {
+                try {
+                    let responseHeader = handshake.responseHeader;
+                    const trojanUdpDecoder = handshake.protocol === 'trojan' && handshake.isUDP
+                        ? new TrojanUdpDecoder()
+                        : null;
+                    const forwardUdp = async (data) => {
+                        if (!trojanUdpDecoder) {
+                            await forwardDataUDP(data, bridge, responseHeader, proxyConfig.dnsResolver);
+                            responseHeader = null;
+                            return;
+                        }
+                        for (const packet of trojanUdpDecoder.push(data)) {
+                            if (packet.port !== 53) throw new Error('Only Trojan DNS UDP is supported');
+                            const framer = new TrojanDnsResponseFramer(packet.addressHeader);
+                            const dnsBridge = {
+                                get readyState() { return bridge.readyState; },
+                                async send(chunk) {
+                                    for (const frame of framer.push(chunk)) await bridge.send(frame);
+                                },
+                                close() { },
+                            };
+                            await forwardDataUDP(
+                                frameTcpDnsQuery(packet.payload),
+                                dnsBridge,
+                                null,
+                                proxyConfig.dnsResolver
+                            );
+                        }
+                    };
+                    if (grpc && responseHeader) {
+                        await bridge.send(responseHeader);
                         responseHeader = null;
-                        return;
                     }
-                    for (const packet of trojanUdpDecoder.push(data)) {
-                        if (packet.port !== 53) throw new Error('Only Trojan DNS UDP is supported');
-                        const framer = new TrojanDnsResponseFramer(packet.addressHeader);
-                        const dnsBridge = {
-                            get readyState() { return bridge.readyState; },
-                            async send(chunk) {
-                                for (const frame of framer.push(chunk)) await bridge.send(frame);
-                            },
-                            close() { },
-                        };
-                        await forwardDataUDP(
-                            frameTcpDnsQuery(packet.payload),
-                            dnsBridge,
-                            null,
-                            proxyConfig.dnsResolver
+                    if (handshake.isUDP) {
+                        if (handshake.rawData.byteLength) {
+                            await forwardUdp(handshake.rawData);
+                        }
+                    } else {
+                        await forwardDataTCP(
+                            handshake.hostname,
+                            handshake.port,
+                            handshake.rawData,
+                            bridge,
+                            responseHeader,
+                            remote,
+                            credential,
+                            proxyConfig
                         );
                     }
-                };
-                if (grpc && responseHeader) {
-                    await bridge.send(responseHeader);
-                    responseHeader = null;
-                }
-                if (handshake.isUDP) {
-                    if (handshake.rawData.byteLength) {
-                        await forwardUdp(handshake.rawData);
-                    }
-                } else {
-                    await forwardDataTCP(
-                        handshake.hostname,
-                        handshake.port,
-                        handshake.rawData,
-                        bridge,
-                        responseHeader,
-                        remote,
-                        credential,
-                        proxyConfig
-                    );
-                }
 
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    if (!value?.byteLength) continue;
-                    if (handshake.isUDP) {
-                        await forwardUdp(value);
-                    } else {
-                        const writer = remote.socket?.writable.getWriter();
-                        if (!writer) throw new Error('Remote socket is unavailable');
-                        try { await writer.write(value); }
-                        finally { writer.releaseLock(); }
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        if (!value?.byteLength) continue;
+                        if (handshake.isUDP) {
+                            await forwardUdp(value);
+                        } else {
+                            const writer = remote.socket?.writable.getWriter();
+                            if (!writer) throw new Error('Remote socket is unavailable');
+                            try { await writer.write(value); }
+                            finally { writer.releaseLock(); }
+                        }
                     }
-                }
 
-                if (handshake.isUDP) bridge.close();
-                else if (remote.socket) {
-                    const writer = remote.socket.writable.getWriter();
-                    try { await writer.close(); }
-                    catch { }
-                    finally { try { writer.releaseLock(); } catch { } }
+                    if (handshake.isUDP) bridge.close();
+                    // Request-body EOF only closes the client's upload side. Keep the
+                    // remote TCP writable stream open so the peer can finish sending
+                    // its response; closing it here can also tear down the readable
+                    // side before XHTTP/gRPC response bytes reach the client.
+                } catch (error) {
+                    console.warn(`${grpc ? 'gRPC' : 'XHTTP'} tunnel failed: ${error?.message || String(error)}`);
+                    try { remote.socket?.close(); } catch { }
+                    bridge.error(error);
+                } finally {
+                    try { reader.releaseLock(); } catch { }
                 }
-            } catch (error) {
-                try { remote.socket?.close(); } catch { }
-                bridge.error(error);
-            } finally {
-                try { reader.releaseLock(); } catch { }
-            }
+            })();
         },
         cancel() {
             try { remote.socket?.close(); } catch { }
