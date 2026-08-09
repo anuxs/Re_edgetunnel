@@ -1,425 +1,186 @@
-# EdgeTunnel
+# Re_edgetunnel
 
 <p align="center">
-  部署在 Cloudflare Workers 上、完全由运维者掌控的 VLESS / Trojan / Shadowsocks 模块化隧道。
+  自托管在 Cloudflare Workers 上的隧道服务，内置管理控制台、原生订阅与优选 IP 配置生成。
 </p>
 
 <p align="center">
-  <a href="README.md">英文</a> ·
+  <a href="README.md">English</a> ·
   <a href="README.zh-CN.md">简体中文</a> ·
-  <a href="README.es.md">西班牙语</a> ·
-  <a href="README.fa.md">波斯语</a>
+  <a href="README.es.md">Español</a> ·
+  <a href="README.fa.md">فارسی</a>
 </p>
 
 <p align="center">
   <img alt="Cloudflare Workers" src="https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white">
-  <img alt="协议" src="https://img.shields.io/badge/协议-VLESS%20%7C%20Trojan%20%7C%20Shadowsocks-2563EB">
-  <img alt="运行时依赖" src="https://img.shields.io/badge/运行时依赖-运维者掌控-16A34A">
-  <img alt="许可证" src="https://img.shields.io/badge/许可证-见%20LICENSE-64748B">
+  <img alt="协议" src="https://img.shields.io/badge/VLESS%20%7C%20Trojan%20%7C%20Shadowsocks-0F766E">
+  <img alt="管理控制台" src="https://img.shields.io/badge/Admin-self--hosted-2563EB">
+  <img alt="测试" src="https://img.shields.io/badge/tests-node--test-16A34A">
 </p>
 
+<p align="center">
+  <img src="docs/images/edgetunnel-overview.png" alt="Re_edgetunnel 服务概览" width="100%">
+</p>
+
+Re_edgetunnel 是一个模块化 Cloudflare Worker：接收 VLESS 与 Trojan 的 WebSocket、XHTTP、gRPC 流量，以及通过 WebSocket 承载的 Shadowsocks SIP003 AEAD 流量，再使用 Cloudflare Socket API 建立出站 TCP 连接。同一个 Worker 还提供本地管理控制台，用来管理订阅、优选 IP、服务设置、访问日志、集成、备份和恢复。
+
+控制台页面、样式、脚本、二维码生成器都随本仓库发布。运行时不会从第三方 GitHub 仓库、CDN 或公共面板拉取代码；可选集成在你主动配置之前保持关闭。
+
 > [!IMPORTANT]
-> EdgeTunnel 仅用于合法研究、学习，以及访问你有权使用的系统。使用者有责任遵守所在地法律、Cloudflare 服务条款和相关网络策略。
+> 仅将本项目用于合法用途，以及你有权访问的系统和网络。Cloudflare 服务条款、当地法律、客户端配置和目标网络策略均由部署者负责。
 
-## 项目是什么
+## 先看结论
 
-EdgeTunnel 是一个模块化 Cloudflare Worker。它接收 **VLESS/Trojan over WebSocket、XHTTP 或 gRPC**，以及 **Shadowsocks SIP003 AEAD over WebSocket**，再通过 Cloudflare Socket API 直连或经显式配置的上游代理建立出站 TCP。配置、登录会话、地址列表和请求日志都保存在部署者自己的 Workers KV 中。
-
-运行时不会从其他 GitHub 仓库或 CDN 下载代码、后台页面或配置。所有远程扩展默认关闭，只有管理员明确填写自己掌控的服务地址后才会启用。
-
-### 当前功能状态
-
-| 功能 | 状态 |
+| 项目 | 当前能力 |
 | --- | --- |
-| VLESS over WebSocket/TLS | 支持 |
-| Trojan over WebSocket/TLS | 支持 |
-| VLESS/Trojan over XHTTP `stream-one` | 支持；请求和响应均为有界流式处理 |
-| VLESS/Trojan over gRPC Hunk | 支持；兼容拆分帧和合并帧 |
-| Shadowsocks `aes-128-gcm` / `aes-256-gcm` | 支持；WebSocket + SIP003 AEAD 分帧 |
-| Trojan UDP DNS | 支持；必须配置自有 TCP DNS |
-| Cloudflare Socket 出站 TCP | 支持 |
-| SOCKS5、HTTP、HTTPS 上游代理 | 支持 |
-| TURN/TURNS RFC 6062 上游 | 已实现 TCP Allocate、Connect 和 ConnectionBind |
-| SSTP 上游 | 已实现 TLS、PPP PAP/IPCP 和 IPv4 内层 TCP |
-| 密码登录、KV 会话、注销 | 支持 |
-| 带 token 的订阅 | 支持 |
-| 本地地址列表订阅 | 支持 |
-| 有界的直连/反代竞速拨号 | 支持；按请求生效，`1`-`4` 路 |
-| 本地 HTTP 204 连通性测速响应 | 支持；不会产生出站测速流量 |
-| Mihomo/Clash、Sing-box、Surge 转换 | 可选；需要管理员自建转换服务 |
-| 内置图形化管理后台 | 支持；包含概览、节点、优选 IP、设置、日志、集成、备份与安全管理 |
-| 原生 Mihomo/Clash 与分享链接导出 | 支持；无需转换器，可按优选 IP 替换连接地址 |
-| Hysteria2、TUIC 等原生 QUIC/UDP 协议 | 当前 Worker 架构不支持 |
+| 入站协议 | VLESS、Trojan、Shadowsocks SIP003 AEAD |
+| 传输方式 | WebSocket、XHTTP `stream-one`、gRPC Hunk；Shadowsocks 使用 WebSocket |
+| 出站方式 | 通过 `cloudflare:sockets` 建立 TCP，可直连或走部署者配置的上游代理 |
+| 原生导出 | Mihomo/Clash YAML、分享链接，不依赖公共订阅转换服务 |
+| 优选 IP | 导入本地扫描结果、保存到 KV，并生成带 `ip`、`port`、`name` 的可刷新订阅 URL |
+| 管理功能 | 密码登录、KV 会话、概览、节点、设置、日志、集成、备份/恢复、退出登录 |
+| 可选上游 | SOCKS5、HTTP CONNECT、HTTPS CONNECT、TURN/TURNS RFC 6062、SSTP |
+| 不包含 | 本地运营商线路扫描器、原生 QUIC/UDP 入站、Hysteria2、TUIC、WireGuard、VLESS Reality |
 
-> [!NOTE]
-> `/admin` 现在是随 Worker 一起打包的完整管理应用，不会从第三方加载面板、脚本、字体、二维码服务或配置。管理 UI 与隧道数据路径相互独立，升级 UI 不会改变既有代理入口和旧订阅路由。
-
-## 架构与信任边界
+## 整体结构
 
 ```mermaid
 flowchart LR
-    C["VLESS / Trojan / Shadowsocks 客户端"] -->|"WebSocket、XHTTP 或 gRPC"| W["你的 Cloudflare Worker"]
-    A["管理员浏览器"] -->|"/login 与 /admin"| W
+    C["VLESS / Trojan / Shadowsocks 客户端"] -->|"WS、XHTTP 或 gRPC"| W["你的 EdgeTunnel Worker"]
+    B["浏览器"] -->|"/login 与 /admin"| W
     W --> K["你的 Workers KV"]
-    W -->|"TCP Socket"| D["请求的目标地址"]
-    W -. "可选上游" .-> P["SOCKS5 / HTTP(S) / TURN(S) / SSTP"]
-    W -. "显式配置后才启用" .-> O["管理员自有 DNS / 转换器 / API"]
+    W -->|"TCP Socket"| D["你有权访问的目标"]
+    S["本地 IP 扫描器"] -->|"导入结果"| B
+    W -. "可选" .-> P["部署者自有上游代理"]
+    W -. "可选" .-> O["部署者自有 DNS、转换器或诊断接口"]
 ```
 
-必须依赖：
+管理控制台和隧道数据面共用一个 Worker，但使用不同路由。打开 `/admin` 不会改变转发路径；使用优选 IP 只会改变客户端连接 Cloudflare 边缘时使用的地址，不会改变 Worker 的出站线路。
 
-- Cloudflare Workers 运行平台。
-- 一个以 `KV` 为绑定名的 Workers KV 命名空间。
+## 页面预览
 
-以下集成全部默认关闭：
+下面的截图来自当前源码的本地运行实例。截图使用虚构 UUID 和 RFC 文档保留地址，不含生产域名、Cloudflare 账户信息、真实订阅 Token 或密码。
 
-- 用于 VLESS DNS 转发的管理员自有 DNS。
-- 管理员自建的订阅转换服务与转换配置。
-- 管理员自建的代理检测端点。
-- 管理员自建的位置数据接口。
-- 启用 ECH 时由管理员选择的 HTTPS DoH。
-- Telegram 通知、远程伪装站和 Cloudflare 用量 API。
+### 登录页
+
+<p align="center">
+  <img src="docs/images/edgetunnel-login.png" alt="EdgeTunnel 登录页" width="480">
+</p>
+
+### 优选 IP 库
+
+<p align="center">
+  <img src="docs/images/edgetunnel-preferred-ip.png" alt="优选 IP 导入与选择" width="100%">
+</p>
+
+### 节点与订阅生成器
+
+<p align="center">
+  <img src="docs/images/edgetunnel-node-builder.png" alt="使用文档保留地址生成节点和订阅" width="100%">
+</p>
 
 ## 部署前准备
 
-需要准备：
+需要以下条件：
 
 - 已启用 Workers 的 Cloudflare 账户。
-- Node.js 和 npm。
-- Git。
-- 可以执行命令的终端。
+- 一个只给本次部署使用的 Workers KV 命名空间。
+- 当前 Node.js LTS、npm 与 Git。
+- 如需使用域名区域的 gRPC 能力，准备一个位于同一 Cloudflare 账户下的自定义域名。
+- 可导入生成配置的客户端，例如 Mihomo/Clash。
 
-Cloudflare 目前建议在每个项目中本地安装 Wrangler。下文统一使用 `npx`，确保优先调用项目内版本。
+项目使用了 `cloudflare:sockets`，因此目标运行环境是 Cloudflare Workers，不能直接作为 Vercel Function 或 Vercel Edge Function 使用。
 
-## 完整部署步骤
+## 从空白环境完整部署
 
-### 第 1 步：克隆仓库
+### 1. 克隆与安装
 
 ```bash
 git clone https://github.com/tianrking/Re_edgetunnel.git
 cd Re_edgetunnel
+npm ci
 ```
 
-### 第 2 步：在项目内安装最新版 Wrangler
+如果希望固定部署工具版本，可在项目里安装 Wrangler：
 
 ```bash
 npm install --save-dev wrangler@latest
 npx wrangler --version
 ```
 
-建议使用 Wrangler 4.x 或更高版本。
-
-### 第 3 步：登录 Cloudflare
+### 2. 登录正确的 Cloudflare 账户
 
 ```bash
 npx wrangler login
 npx wrangler whoami
 ```
 
-第一条命令会打开浏览器完成授权；第二条命令用来确认当前 Cloudflare 账户。
+创建 KV 或部署前务必查看 `whoami`。这一步可以避免 Worker 被部署到另一个已登录账户。
 
-### 第 4 步：创建并绑定独立 KV
+### 3. 创建私有 Wrangler 配置
 
-先复制一份只在本机使用的部署配置。`wrangler.local.toml` 已被 Git
-忽略，因此 KV ID、自定义域名和可选的 Cloudflare Account ID 不会被提交：
+仓库中的 `wrangler.toml` 是公开模板。先复制为已被 Git 忽略的本地文件：
 
 ```bash
 cp wrangler.toml wrangler.local.toml
-# PowerShell：Copy-Item wrangler.toml wrangler.local.toml
+# PowerShell: Copy-Item wrangler.toml wrangler.local.toml
 ```
+
+可以在 `wrangler.local.toml` 中修改 Worker 的 `name`。不要提交这个本地文件。
+
+### 4. 创建并绑定 KV
 
 ```bash
 npx wrangler kv namespace create KV
 ```
 
-命令成功后会输出 KV ID。打开 `wrangler.local.toml`，替换占位符：
+Wrangler 会输出命名空间 ID。只在 `wrangler.local.toml` 中替换占位值：
 
 ```toml
 [[kv_namespaces]]
 binding = "KV"
-id = "把刚才获得的-KV-ID-粘贴到这里"
+id = "paste-your-kv-namespace-id-here"
 ```
 
-`binding` 必须保持为 `KV`，因为程序通过 `env.KV` 访问它。
+绑定名称必须保持为 `KV`。测试与生产应使用不同命名空间；共用 KV 会同时共用设置、地址列表、日志和登录会话。
 
-测试与生产请使用不同 KV。共用 KV 会同时共用配置、管理员会话、地址列表和日志。
-
-### 第 5 步：检查代码并首次部署
+### 5. 检查并首次部署
 
 ```bash
-npm test
 npm run check
+npm test
 npx wrangler deploy --dry-run --config wrangler.local.toml
 npx wrangler deploy --config wrangler.local.toml
 ```
 
-首次部署用于创建 Worker。在还没有配置 `ADMIN` 时，HTTP 请求会返回 `503 Administrator password is not configured.`，这是主动保护，不是程序崩溃。
+尚未设置 `ADMIN` 时，普通 HTTP 请求会有意返回 `503 Administrator password is not configured.`。
 
-### 第 6 步：安全设置管理员密码
+### 6. 用 Cloudflare Secrets 保存两项凭据
 
-如果还没有强密码，可以在本机生成：
+在本地生成管理员密码和一个独立的 RFC 4122 v4 UUID：
 
 ```bash
 node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
-```
-
-然后通过交互方式保存为 Cloudflare Secret：
-
-```bash
-npx wrangler secret put ADMIN --config wrangler.local.toml
-```
-
-按照提示粘贴密码。不要把真实密码写进源码、README 或 `wrangler.toml`。`secret put` 会创建并立即部署一个新版本。
-
-### 第 7 步：设置独立的 UUID
-
-UUID 是 VLESS 凭据，也作为 Trojan 密码使用。生成一个 RFC 4122 v4 UUID：
-
-```bash
 node -e "console.log(require('node:crypto').randomUUID())"
 ```
 
-保存为 Secret：
+在 Wrangler 的交互提示中输入，不要把值写进命令行或 TOML：
 
 ```bash
+npx wrangler secret put ADMIN --config wrangler.local.toml
 npx wrangler secret put UUID --config wrangler.local.toml
-```
-
-`ADMIN` 和 `UUID` 必须使用两个不同的值。更换 UUID 后，旧节点和旧订阅里的凭据会立即失效。
-
-确认两个 Secret 名称已经存在：
-
-```bash
 npx wrangler secret list --config wrangler.local.toml
 ```
 
-Cloudflare 只会显示 Secret 名称，不会回显内容。
+- `ADMIN` 是 `/login` 的后台密码。
+- `UUID` 是 VLESS 凭据，也是生成的 Trojan 与 Shadowsocks 节点所用密码。
+- 订阅 `TOKEN` 不是后台密码，它由当前访问域名和 UUID 派生。
 
-### 第 8 步：打开 Worker
+`ADMIN` 与 `UUID` 应使用不同值。更换 `ADMIN` 不会改变节点；更换 `UUID` 会让旧节点失效，并生成新的订阅 Token。
 
-Wrangler 会输出类似下面的地址：
+### 7. 添加自定义域名
 
-```text
-https://edgetunnel.<你的-workers-子域>.workers.dev
-```
-
-根路径默认显示 nginx 风格的伪装页，这是正常行为。应访问：
-
-```text
-https://edgetunnel.<你的-workers-子域>.workers.dev/login
-```
-
-使用 `ADMIN` 密码登录，然后进入 `/admin`。
-
-## 首次使用：获取节点和订阅
-
-### 获取单节点链接
-
-登录后：
-
-1. 打开 `/admin`。
-2. 打开“节点与订阅”。
-3. 复制 VLESS、Trojan 或 Shadowsocks 链接、显示本地二维码，或者下载原生 Mihomo/Clash YAML。
-4. 导入支持相应协议的客户端。
-
-控制台会根据已启用的传输生成 WebSocket、XHTTP 和 gRPC 节点。UUID 不会作为单独的明文字段展示，但复制的节点链接和受保护订阅中必然包含客户端连接所需凭据。
-
-### 获取订阅链接
-
-控制台会直接显示可复制的原生订阅 URL。需要兼容旧脚本时，也可以从登录后才能访问的 `/admin/config.json` 中找到：
-
-```text
-优选订阅生成.TOKEN
-```
-
-将它拼成：
-
-```text
-https://你的域名/sub?token=你的TOKEN
-```
-
-订阅 URL 本身就是凭据，不能公开发布、截图分享或提交到 Git。
-
-### 支持的订阅输出
-
-| 输出类型 | URL 后缀 | 条件 |
-| --- | --- | --- |
-| 浏览器直接显示原始节点 | `/sub?token=TOKEN` | 不依赖外部服务 |
-| Base64 节点订阅 | `/sub?token=TOKEN&base64` | 不依赖外部服务 |
-| 原生 Mihomo/Clash YAML | `/sub?token=TOKEN&format=clash` | 不依赖外部服务 |
-| 原生节点分享链接文本 | `/sub?token=TOKEN&format=links` | 不依赖外部服务 |
-| 使用优选 IP 的原生 Clash | `/sub?token=TOKEN&format=clash&ip=104.18.35.249` | 本地实测可用的 Cloudflare IPv4 或 IPv6 |
-| 旧版转换式 Mihomo/Clash YAML | `/sub?token=TOKEN&clash` | 必须配置自建 `SUBAPI` 和 `SUBCONFIG` |
-| Sing-box JSON | `/sub?token=TOKEN&singbox` | 必须配置自建 `SUBAPI` 和 `SUBCONFIG` |
-| Surge 配置 | `/sub?token=TOKEN&surge` | 必须配置自建 `SUBAPI` 和 `SUBCONFIG` |
-| Quantumult X | `/sub?token=TOKEN&quanx` | 必须配置自建 `SUBAPI` 和 `SUBCONFIG` |
-| Loon | `/sub?token=TOKEN&loon` | 必须配置自建 `SUBAPI` 和 `SUBCONFIG` |
-
-原生输出还支持可选参数 `port`、`name` 和 `download=1`。加入 `ip` 后只会替换节点的连接 `server`，加入 `port` 时再替换端口；TLS `servername`/SNI、HTTP `Host`、隧道路径、UUID/密码仍然保持 Worker 服务值。因此客户端会连接优选 IP，但 Cloudflare 仍能把流量路由到正确的 Worker。控制台会严格校验 IPv4/IPv6，并可在当前部署的 KV 中保存最多 128 条本地扫描结果。
-
-网页运行在 Cloudflare 侧，不能代替你从本地运营商网络做真实线路扫描。请在实际使用设备上扫描延迟，把结果导入“优选 IP”，再在实际客户端中测试。Mihomo、Sing-box、Surge 等是客户端配置格式，不是 Worker 新增的入站网络协议。旧版转换请求未配置自建转换器时会返回 HTTP 501；原生 `format=clash` 和 `format=links` 完全不需要转换器。
-
-## 可选：独立的 Clash 订阅 Worker
-
-仓库还提供一个可选的配套 Worker，可直接生成带密码保护的 Mihomo/Clash
-YAML 和分享链接，不需要使用公共订阅转换站。它需要单独部署，并显式填写你自己的
-Tunnel 域名及 Cloudflare Secrets。
-
-完整的通用部署步骤见
-[workers/clash-sub/README.zh-CN.md](workers/clash-sub/README.zh-CN.md)。Cloudflare
-Account ID、KV ID、自定义域名、UUID、密码和订阅 Token 只能放在被 Git 忽略的
-本地配置或 Cloudflare Secrets 中，不要把任何账户专用 Wrangler 文件提交到仓库。
-
-## 图形化管理后台
-
-管理接口需要有效的 KV 会话。登录会话有效期为 24 小时，执行注销后立即撤销。
-
-| 路径 | 方法 | 用途 |
-| --- | --- | --- |
-| `/login` | GET、POST | 显示本地登录页并创建会话 |
-| `/admin` | GET | 自适应桌面与手机的内置管理后台 |
-| `/admin/api/bootstrap` | GET | 读取脱敏后的 UI 状态、原生订阅、优选 IP 和近期日志 |
-| `/admin/api/preview` | GET | 使用服务域名或经过校验的优选 IP 预览节点与订阅 |
-| `/admin/api/settings` | POST | 只保存 UI 管理的订阅设置，保留其他运维配置 |
-| `/admin/api/preferred-ips` | POST | 导入、校验、去重并保存优选 IPv4/IPv6 |
-| `/admin/api/backup` | GET | 导出 UI 设置和优选 IP，不包含管理员密码、UUID、订阅 token 或集成密钥 |
-| `/admin/api/restore` | POST | 恢复经过结构校验的控制台备份 |
-| `/admin/config.json` | GET | 查看有效配置、节点 `LINK` 和订阅 TOKEN |
-| `/admin/config.json` | POST | 将完整配置 JSON 保存到 KV |
-| `/admin/ADD.txt` | GET | 查看已保存地址或本地生成的备用地址 |
-| `/admin/ADD.txt` | POST | 保存自己的地址列表 |
-| `/admin/log.json` | GET | 查看请求日志 |
-| `/admin/init` | POST | 把 `config.json` 重置为默认值，不删除地址和日志 |
-| `/admin/check` | GET | 使用自有检测端点测试上游 SOCKS5/HTTP 代理 |
-| `/logout` | GET | 撤销当前会话并清除 Cookie |
-
-所有修改配置的 POST 都必须携带同源 `Origin` 或 `Referer`，这是 CSRF 防护。
-
-### 在浏览器中修改配置
-
-日常设置直接使用 `/admin` 的“服务设置”页面：可以管理订阅名称、隧道路径、传输协议、TLS 指纹、刷新间隔、Shadowsocks、0-RTT 和证书校验策略。页面还提供不含密钥的备份/恢复，以及只重置 UI 管理字段的“恢复默认配置”；它不会删除优选 IP、`ADMIN`、`UUID` 或其他运维配置。
-
-下面的原始 JSON 接口继续保留，供高级操作和旧脚本兼容使用。
-
-登录后打开 `/admin`，再打开浏览器开发者控制台，执行：
-
-```js
-const config = await fetch('/admin/config.json').then((response) => response.json());
-
-// 示例：把生成链接从 VLESS 切换为 Trojan。
-config.协议类型 = 'trojan';
-
-const response = await fetch('/admin/config.json', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(config),
-});
-
-console.log(response.status, await response.text());
-```
-
-成功时返回 `{"success":true}`。重新打开 `/admin/config.json` 检查实际生效值。
-
-### 保存自己的地址列表
-
-每行格式：
-
-```text
-域名或IP:端口#显示名称
-```
-
-示例：
-
-```text
-example.com:443#主节点
-203.0.113.10:443#IPv4 示例
-[2001:db8::10]:443#IPv6 示例
-```
-
-以上地址属于文档示例，请替换为你有权使用的地址。非法格式以及不在 `1-65535` 范围内的端口会被忽略。
-
-在已经登录的同源浏览器控制台执行：
-
-```js
-const addresses = `example.com:443#主节点
-203.0.113.10:443#备用节点`;
-
-const response = await fetch('/admin/ADD.txt', {
-  method: 'POST',
-  headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-  body: addresses,
-});
-
-console.log(response.status, await response.text());
-```
-
-### 重置主配置
-
-```js
-const response = await fetch('/admin/init', { method: 'POST' });
-console.log(response.status, await response.text());
-```
-
-该操作只重置 `config.json`，不会删除 `ADD.txt`、日志、现有会话、Telegram 设置或 Cloudflare 用量设置。
-
-## 重要配置字段
-
-| JSON 字段 | 默认值 | 说明 |
-| --- | --- | --- |
-| `协议类型` | `vless` | 生成节点使用 `vless` 或 `trojan` |
-| `支持协议` | `vless`、`trojan` | 由运行时维护的能力说明 |
-| `传输协议` | `ws` | WebSocket 传输 |
-| `HOSTS` | Worker 当前域名 | 生成订阅时使用的域名列表 |
-| `跳过证书验证` | `false` | 设为 true 会关闭客户端证书校验，不建议 |
-| `启用0RTT` | `false` | 在生成路径上添加 WebSocket early-data 参数 |
-| `随机路径` | `false` | 本地生成订阅节点时使用 `/` 路径 |
-| `Fingerprint` | `chrome` | 客户端 TLS 指纹提示 |
-| `ECH` | `false` | 只有配置 HTTPS DoH 后才生成 ECH 客户端参数 |
-| `优选订阅生成.local` | `true` | 从本地 KV 地址列表生成订阅 |
-| `优选订阅生成.SUBNAME` | `edgetunnel` | 节点和订阅显示名称 |
-| `优选订阅生成.SUBUpdateTime` | `3` | 建议客户端每多少小时更新 |
-| `优选订阅生成.本地IP库.随机数量` | `16` | 没有保存地址时本地生成的备用数量 |
-| `订阅转换配置.SUBAPI` | `null` | 自建订阅转换器根地址 |
-| `订阅转换配置.SUBCONFIG` | `null` | 自有转换配置 HTTPS 地址 |
-| `本地规则集URL` | `null` | 自有 Sing-box `.srs` 规则集根地址 |
-| `客户端DNS` | `[]` | 明确写进 Clash 输出的自有 DNS 列表 |
-| `TG.启用` | `false` | 配置凭据后开启 Telegram 请求通知 |
-
-`HOST`、`UUID`、`PATH`、`LINK`、`TOKEN`、时间、用量和加载耗时属于运行时派生字段，读取时可能被 Worker 重新计算。
-
-## 部署变量与可选集成
-
-敏感内容必须使用 `wrangler secret put`。非敏感运行参数可以写在 `wrangler.toml` 的 `[vars]` 中。
-
-| 变量 | 必需 | 用途 |
-| --- | --- | --- |
-| `ADMIN` | 是 | 管理员密码，必须保存为 Secret |
-| `UUID` | 强烈建议 | RFC 4122 v4 的 VLESS/Trojan 凭据，保存为 Secret |
-| `KEY` | 否 | 额外密钥输入及可选私有订阅捷径，应保存为 Secret |
-| `HOST` | 否 | 订阅使用的多个域名，可用逗号或换行分隔 |
-| `URL` | 否 | 根路径伪装：`nginx`、`1101` 或明确的 HTTPS 源站 |
-| `PROXYIP` | 否 | 管理员选择的 TCP 回退代理地址 |
-| `UPSTREAM_PROXY` | 否 | 完整的 `socks5://`、`http://`、`https://`、`turn://`、`turns://` 或 `sstp://` 上游 URL |
-| `TCP_CONCURRENT_DIAL` | 否 | 直连 TCP 竞速拨号数，限制在 `1`-`4`，默认 `1` |
-| `PROXY_CONCURRENT_DIAL` | 否 | 反代候选竞速拨号数，限制在 `1`-`4`，默认 `1` |
-| `SPEEDTEST_MODE` | 否 | `local`（默认）返回有界的本地 HTTP 204；`block` 直接关闭隧道 |
-| `SPEEDTEST_DOMAINS` | 否 | 本地测速域名，逗号或换行分隔；默认包含 `speed.cloudflare.com` 和 `cp.cloudflare.com` |
-| `DNS_RESOLVER` | 否 | VLESS/Trojan DNS 以及 TURN/SSTP 域名解析使用的自有 TCP DNS |
-| `DNS_RESOLVER_PORT` | 否 | DNS 端口，默认 `53` |
-| `PROXY_CHECK_HOST` | 否 | 代理测试使用的自有 HTTP 端点主机 |
-| `PROXY_CHECK_PORT` | 否 | 检测端口，默认 `80` |
-| `PROXY_CHECK_PATH` | 否 | 检测路径，默认 `/` |
-| `LOCATIONS_API` | 否 | 自有 HTTPS 位置数据接口 |
-| `ECH_DOH_URL` | 否 | 仅在 ECH 查询时使用的明确 HTTPS DoH |
-| `ALLOW_REMOTE_USAGE_API` | 否 | 必须为 `true` 才允许请求已保存的远程用量 API |
-
-没有配置可选端点时，对应功能会关闭，不会自动选择隐藏的公共服务。
-
-拨号参数按请求解析，不会保存在可跨请求污染的可变全局状态中。本地测速模式不会建立出站 Socket，支持分片及 keep-alive HTTP 请求，并对请求头、请求体、流水线数量和缓存大小设置硬限制。
-
-## 绑定自定义域名
-
-将 Cloudflare 账户中已经管理的域名加入 `wrangler.toml`：
+只在 `wrangler.local.toml` 中添加：
 
 ```toml
 routes = [
@@ -430,160 +191,306 @@ routes = [
 重新部署：
 
 ```bash
-npx wrangler deploy
+npx wrangler deploy --config wrangler.local.toml
 ```
 
-域名改变后需要重新打开 `/admin/config.json`。订阅 token 由域名和 UUID 派生，`workers.dev` 域名的 token 不能直接用于自定义域名。
+如果使用 gRPC，在 Cloudflare 域名区域的“网络”设置中启用 gRPC，并确保客户端 SNI/servername 仍是自定义域名。`workers.dev` 域名和自定义域名会得到不同的订阅 Token。
 
-## 更新与回滚
+### 8. 登录后台
 
-```bash
-git pull --ff-only
-npm test
-npm run check
-npx wrangler deploy --dry-run
-npx wrangler deploy
+打开：
+
+```text
+https://tunnel.example.com/login
 ```
 
-查看版本或回滚：
+使用 `ADMIN` 登录。根路径默认显示仿 nginx 页面，这是正常行为。
 
-```bash
-npx wrangler versions list
-npx wrangler rollback
+## 第一次使用
+
+### 生成原生 Clash 订阅
+
+登录后：
+
+1. 打开“节点与订阅”。
+2. 不填写优选 IP 时使用 Worker 域名；也可以选中已经导入的本地扫描结果。
+3. 生成节点预览。
+4. 复制可刷新的订阅 URL，或下载 Mihomo/Clash YAML。
+5. 导入客户端，并在实际网络中测试。
+
+原生端点：
+
+| 输出 | URL |
+| --- | --- |
+| 原始 URI 列表 | `/sub?token=TOKEN` |
+| Base64 URI 订阅 | `/sub?token=TOKEN&base64` |
+| Mihomo/Clash YAML | `/sub?token=TOKEN&format=clash` |
+| 分享链接文本 | `/sub?token=TOKEN&format=links` |
+| 使用优选地址的 Clash | `/sub?token=TOKEN&format=clash&ip=IP` |
+| 强制下载 | 在 URL 后追加 `&download=1` |
+
+优选 IP 相关参数：
+
+| 参数 | 含义 |
+| --- | --- |
+| `ip` | 合法 IPv4 或 IPv6 连接地址 |
+| `port` | 可选端口，范围 `1` 到 `65535`，默认 `443` |
+| `name` | 可选节点名称，Worker 会限制长度并清理控制字符 |
+
+订阅 URL 本身就是凭据。不要把它粘贴到公开 Issue、截图、统计服务或公共订阅转换站。
+
+### 使用本地扫描出来的 Cloudflare IP
+
+Worker 无法测量你当前运营商到 Cloudflare 的线路。扫描器必须运行在真正使用该节点的设备或网络中，然后把结果导入 `/admin`。
+
+支持的每行格式：
+
+```text
+IP
+IP:端口
+IP:端口#名称
+IP:端口#名称,28ms
+[IPv6]:端口#名称,42ms
 ```
 
-执行破坏性配置操作前，应从已认证管理接口备份 `config.json` 和 `ADD.txt`。
+仅用于文档的保留地址示例：
+
+```text
+198.51.100.42:443#Example-v4,28ms
+[2001:db8::42]:443#Example-v6,42ms
+```
+
+使用 `ip` 参数时，只会修改生成节点的 `server` 和可选 `port`：
+
+| 字段 | 处理方式 |
+| --- | --- |
+| `server` / 连接地址 | 替换为选中的 IP |
+| TLS `servername` / SNI | 继续使用 Worker 域名 |
+| WebSocket `Host` | 继续使用 Worker 域名 |
+| XHTTP `host` | 继续使用 Worker 域名 |
+| gRPC service name | 使用隧道路径去掉开头 `/` 后的值 |
+| UUID、密码与路径 | 保持不变 |
+
+如果把 `server`、SNI、Host 和路径全部改成 IP，Cloudflare 将无法正确识别目标 Worker。优选 IP 只是边缘连接地址，域名仍负责 TLS 与路由识别。
+
+## 管理控制台
+
+控制台会生成随机 256 位会话 Token，在 KV 中使用 SHA-256 派生键保存。Cookie 使用 `HttpOnly`、`Secure` 和 `SameSite=Strict`。会话 24 小时后过期；退出登录会立即撤销当前会话。
+
+| 页面 | 作用 |
+| --- | --- |
+| 概览 | 查看协议/传输状态、域名、隧道路径、脱敏凭据、订阅请求数和优选 IP 数量 |
+| 节点与订阅 | 生成 VLESS、Trojan、Shadowsocks 节点，本地绘制二维码，导出链接和 Clash YAML |
+| 优选 IP | 导入、校验、去重、保存、选择和删除最多 128 个 IPv4/IPv6 结果 |
+| 服务设置 | 修改订阅名称、路径、传输、指纹、刷新间隔、证书策略、0-RTT 和 Shadowsocks 设置 |
+| 访问日志 | 查看 KV 日志；带凭据的查询参数在写入前会被移除 |
+| 集成与诊断 | 查看显式配置的转换器、代理检测、用量 API、DNS、ECH、Telegram 与伪装站设置 |
+| 安全 | 导出不含秘密的备份、恢复经过校验的设置、重置 UI 管理的默认值 |
+
+主要管理路由：
+
+| 路由 | 方法 | 作用 |
+| --- | --- | --- |
+| `/login` | GET、POST | 创建管理员会话 |
+| `/admin` | GET | 加载自包含控制台 |
+| `/admin/api/bootstrap` | GET | 返回已脱敏的控制台模型和原生导出信息 |
+| `/admin/api/preview` | GET | 预览域名或指定优选 IP 的节点 |
+| `/admin/api/settings` | POST | 保存 UI 管理的设置，同时保留无关配置 |
+| `/admin/api/preferred-ips` | POST | 导入并保存本地扫描结果 |
+| `/admin/api/backup` | GET | 导出设置和 IP，不包含 ADMIN、UUID、Token 或集成秘密 |
+| `/admin/api/restore` | POST | 恢复经过校验的控制台备份 |
+| `/admin/config.json` | GET、POST | 高级管理与旧配置结构兼容入口 |
+| `/admin/ADD.txt` | GET、POST | 读取或替换部署者自己的地址列表 |
+| `/admin/log.json` | GET | 读取访问日志 |
+| `/admin/init` | POST | 重置 `config.json`，不会删除地址列表和日志 |
+| `/admin/check` | GET | 检测显式配置的 SOCKS5/HTTP 上游 |
+| `/logout` | GET | 撤销当前会话 |
+
+所有修改配置的 POST 请求都要求同源 `Origin` 或 `Referer`，这是 CSRF 防护的一部分。
+
+## 运行变量
+
+敏感值放在 Cloudflare Secrets 中。必须因部署而异的非敏感值，可以放在已忽略的 `wrangler.local.toml`。
+
+| 变量 | 推荐保存位置 | 用途 |
+| --- | --- | --- |
+| `ADMIN` | Secret，必需 | 后台管理员密码 |
+| `UUID` | Secret，强烈建议 | 生成节点使用的标准 v4 UUID |
+| `KEY` | Secret，可选 | 额外私有快捷路径与兼容密钥 |
+| `HOST` | 普通变量，可选 | 覆盖生成配置中的域名列表 |
+| `PATH` | 普通变量，可选 | 隧道路径，默认 `/tunnel` |
+| `URL` | 普通变量，可选 | 根路径伪装：`nginx`、`1101` 或显式 HTTPS 源站 |
+| `PROXYIP` | 普通变量或 Secret | 部署者选择的回退代理 IP |
+| `UPSTREAM_PROXY` | 带凭据时使用 Secret | `socks5://`、`http://`、`https://`、`turn://`、`turns://` 或 `sstp://` 上游 |
+| `TCP_CONCURRENT_DIAL` | 普通变量 | 直连竞速数量，限制为 `1` 到 `4` |
+| `PROXY_CONCURRENT_DIAL` | 普通变量 | 代理候选竞速数量，限制为 `1` 到 `4` |
+| `SPEEDTEST_MODE` | 普通变量 | `local` 返回有边界的本地 HTTP 204；`block` 关闭测速隧道 |
+| `SPEEDTEST_DOMAINS` | 普通变量 | 由本地连通性测试逻辑处理的域名 |
+| `DNS_RESOLVER` / `DNS_RESOLVER_PORT` | 普通变量 | 部署者自有 TCP DNS，用于受支持的 DNS 转发与 TURN/SSTP 解析 |
+| `PROXY_CHECK_HOST` / `PORT` / `PATH` | 普通变量 | 代理诊断使用的部署者自有 HTTP 端点 |
+| `LOCATIONS_API` | 普通变量 | 部署者自有 HTTPS 地理信息接口 |
+| `ECH_DOH_URL` | 普通变量 | 仅在启用 ECH 时使用的显式 HTTPS DoH |
+| `ALLOW_REMOTE_USAGE_API` | 普通变量 | 必须为 `true`，才允许调用保存在配置中的远程 Cloudflare 用量接口 |
+
+为了兼容旧部署，代码仍识别 `PASSWORD`、`TOKEN` 等后台密码别名；新部署应统一使用 `ADMIN`。不要把凭据、Cloudflare 账户 ID、KV ID、私人域名或生成后的订阅 URL 写进受 Git 跟踪的文件。
+
+## 可选订阅转换
+
+原生 `format=clash` 和 `format=links` 永远不需要转换器。只有配置了你自己的 HTTPS 转换服务和配置 URL 后，才会启用旧式客户端格式请求：
+
+| 请求 | 外部依赖 |
+| --- | --- |
+| `?clash` | 自有 `SUBAPI` 与 `SUBCONFIG` |
+| `?singbox` | 自有 `SUBAPI` 与 `SUBCONFIG` |
+| `?surge` | 自有 `SUBAPI` 与 `SUBCONFIG` |
+| `?quanx` | 自有 `SUBAPI` 与 `SUBCONFIG` |
+| `?loon` | 自有 `SUBAPI` 与 `SUBCONFIG` |
+
+未配置时返回 HTTP 501，不会悄悄把订阅发送到公共服务。
+
+## 可选的独立 Clash 订阅 Worker
+
+`workers/clash-sub` 是独立部署的密码保护订阅 Worker，可为一个 EdgeTunnel 域名发布 Clash 配置。它有自己的通用 Wrangler 模板，并需要三个 Secrets：
+
+- `SECRET_TOKEN`
+- `PAGE_PASSWORD`
+- `CLOUDFLARE_UUID`
+
+同时需要设置 `CLOUDFLARE_HOST`，其中 UUID 必须与主 Worker 一致。完整说明见 [workers/clash-sub/README.zh-CN.md](workers/clash-sub/README.zh-CN.md)。不要把个人部署文件复制进仓库。
 
 ## 协议边界
 
 支持：
 
-- VLESS/Trojan over WebSocket、XHTTP `stream-one` 和 gRPC Hunk，由 Cloudflare 终止 TLS。
-- Shadowsocks SIP003 AEAD over WebSocket，支持 `aes-128-gcm` 和 `aes-256-gcm`。
+- VLESS over WebSocket、XHTTP `stream-one`、gRPC Hunk。
+- Trojan over WebSocket、Worker 路由上的 XHTTP、gRPC Hunk；原生 Clash 导出只生成客户端能安全描述的组合。
+- Shadowsocks `aes-128-gcm` 与 `aes-256-gcm`，通过 WebSocket 使用 SIP003 AEAD 分帧。
 - Cloudflare Socket API 可以访问的 TCP 目标。
-- 配置自有 TCP DNS 后的 VLESS/Trojan DNS 转发。
-- SOCKS5、HTTP CONNECT、HTTPS CONNECT、TURN/TURNS RFC 6062 和 SSTP 可作为上游代理，不是客户端入站协议。
+- 配置部署者自有 TCP DNS 后的 VLESS/Trojan DNS。
+- 作为上游路径的 SOCKS5、HTTP(S) CONNECT、TURN(S) RFC 6062 和 SSTP。
 
 不支持：
 
-- 需要原生 QUIC/UDP 的 Hysteria2、TUIC。
-- WireGuard 入站隧道。
-- VLESS Reality，因为 TLS 在 Cloudflare 终止。
-- 原生 TCP 入站或通用 HTTP 正向代理。
-- 任意 UDP 转发；只处理明确配置的 VLESS/Trojan DNS。
+- Hysteria2、TUIC：需要原生 QUIC/UDP。
+- WireGuard 入站。
+- VLESS Reality：TLS 已由 Cloudflare 终止。
+- 任意 UDP 转发；当前 UDP 场景仅是显式配置的 VLESS/Trojan DNS。
+- 原生 TCP 监听或通用 HTTP 正向代理。
 
-TURN 明确限定为 RFC 6062 TCP Allocate/Connect。SSTP 明确限定为 TLS、PPP PAP/IPCP、IPv4 和内层 TCP；要求其他认证、IPv6CP、MPPE 或厂商扩展的服务器不在当前实现范围内。
+TURN 范围限于 RFC 6062 TCP 分配与连接绑定。SSTP 范围限于 TLS、PPP PAP/IPCP、IPv4 与内部 TCP，不宣称支持 MPPE、IPv6CP 或厂商扩展。
 
-增加客户端输出格式，不等于 Worker 核心增加了新的网络协议。
+## 安全与公开发布检查
 
-## 安全模型
+每次公开提交前：
 
-- 登录会话使用随机 256 位 token，KV 只保存经 SHA-256 派生的会话键。
-- Cookie 设置为 `HttpOnly`、`Secure`、`SameSite=Strict`。
-- 会话 24 小时过期，注销时立即删除。
-- 管理员修改请求必须来自同源页面。
-- 订阅接口必须提供由 Worker 域名和 UUID 派生的 token。
-- 请求日志会移除 URL 中的密码、token 和 API 密钥参数。
-- 所有远程运行时集成均为显式选择。
+- 确保 `wrangler.local.toml`、`.dev.vars`、`.wrangler/` 未被跟踪。
+- 使用 Secrets 保存 `ADMIN`、`UUID`、代理凭据、API Token 和独立订阅 Worker 凭据。
+- 文档使用 `198.51.100.0/24`、`2001:db8::/32` 等保留示例地址。
+- 截图来自虚构凭据的本地实例，不从生产后台直接截取。
+- 同时检查当前文件和所有可访问 Git 历史；后续删除某个秘密，并不会把它从旧提交中移除。
+- 任何曾经进入 Git 的凭据都应旋转，即使已经重写历史。
 
-建议：
+访问日志会在写入 KV 前移除常见的凭据查询参数。控制台备份不会包含 `ADMIN`、UUID、订阅 Token、会话和集成秘密。这些措施降低误泄露风险，但不代表订阅 URL 可以公开。
 
-- 不要提交 `ADMIN`、`UUID`、API token、Cookie 或订阅链接。
-- 保持 `跳过证书验证=false`。
-- 测试和生产使用不同 Worker 与 KV。
-- 管理密码泄露后立即更换；已有会话仍会存活到注销或 24 小时到期。
-- 节点泄露后更换 UUID，并让所有客户端重新导入。
-- Cloudflare API Token 只授予最小必要权限。
-
-## 常见问题排查
-
-### 根路径只有 “Welcome to nginx”
-
-这是默认伪装页。请访问 `/login`。
-
-### `/admin` 跳回登录页或样式没有加载
-
-先从 `/login` 登录，确认 `KV` 绑定可用，再检查浏览器扩展或额外反向代理是否拦截了 `/assets/edgetunnel-ui.css` 与 `/assets/edgetunnel-admin.js`。控制台本身不依赖任何外部运行时静态资源。
-
-### 返回 `503 Administrator password is not configured`
+## 更新与回滚
 
 ```bash
-npx wrangler secret put ADMIN
+git pull --ff-only
+npm ci
+npm run check
+npm test
+npx wrangler deploy --dry-run --config wrangler.local.toml
+npx wrangler deploy --config wrangler.local.toml
 ```
 
-完成后等待新版本部署。
-
-### 提示 KV 绑定不存在
-
-检查 `wrangler.toml` 是否填入真实 KV ID，并确认绑定名严格为 `KV`。
-
-### 返回 `403 Invalid Token`
-
-从当前域名的 `/admin/config.json` 重新复制 token。自定义域名和 `workers.dev` 域名使用不同 token。
-
-### 旧版 Clash、Sing-box 或 Surge 转换返回 `501`
-
-只有 `订阅转换配置.SUBAPI` 和 `SUBCONFIG` 都指向管理员控制的 HTTPS 服务后才会开启。原始、Base64、原生 `format=clash` 与 `format=links` 订阅都不需要转换器。
-
-### 代理测试返回 `503`
-
-先配置自有 `PROXY_CHECK_HOST`、`PROXY_CHECK_PORT`、`PROXY_CHECK_PATH`。项目不会自动连接公共检测站。
-
-### WebSocket 已连接但目标没有响应
-
-检查 UUID/密码、TLS host/SNI、WebSocket host/path、目标端口、Cloudflare 日志，以及 Cloudflare 是否允许连接该出站目标。
-
-实时查看生产日志：
+查看版本并回滚：
 
 ```bash
-npx wrangler tail
+npx wrangler versions list --config wrangler.local.toml
+npx wrangler rollback --config wrangler.local.toml
 ```
 
-## 开发与验证
+修改存储设置前先从控制台导出备份。代码回滚不会自动回滚 KV 数据。
+
+## 常见问题
+
+### 根页面显示 “Welcome to nginx”
+
+这是默认伪装页，请打开 `/login`。
+
+### `503 Administrator password is not configured`
+
+```bash
+npx wrangler secret put ADMIN --config wrangler.local.toml
+```
+
+### KV 绑定错误
+
+确认 ID 真实存在、绑定名正好是 `KV`，并确认 Wrangler 当前登录的是拥有该命名空间的账户。
+
+### `403 Invalid Token`
+
+从当前访问域名的控制台重新复制订阅。`workers.dev` 与自定义域名 Token 不同，更换 UUID 后 Token 也会变化。
+
+### `/admin` 又跳回登录页
+
+重新登录，检查 KV 绑定，并确认额外代理或浏览器扩展没有拦截 `/assets/edgetunnel-ui.css` 与 `/assets/edgetunnel-admin.js`。
+
+### gRPC 无法连接
+
+使用自定义域名，在 Cloudflare 域名区域开启 gRPC，并保持客户端 SNI/servername 为该域名。不要把 SNI 改成优选 IP。
+
+### WebSocket 已连接但目标无响应
+
+检查 UUID/密码、SNI、Host、路径、目标端口、Cloudflare 出站限制与 Worker 日志：
+
+```bash
+npx wrangler tail --config wrangler.local.toml
+```
+
+### 旧式订阅转换返回 501
+
+配置自有 `SUBAPI` 与 `SUBCONFIG`，或直接使用原生 `format=clash` / `format=links`。
+
+## 开发与测试
 
 ```bash
 npm run check
 npm test
 ```
 
-Cloudflare 真实环境验证脚本：
+针对专用 Cloudflare 测试环境的可选联调：
 
 ```bash
 npm run test:cloudflare:http
 npm run test:cloudflare
 ```
 
-真实环境脚本需要专门创建的测试 Worker、测试 KV 和测试凭据。不要对生产数据运行破坏性测试。
+不要用生产凭据和生产 KV 运行外部协议测试。
 
-## 项目目录
+目录结构：
 
 ```text
 src/
-├── index.js                 # Worker 入口与路由
-├── config.js                # 默认配置、KV、节点、日志
-├── controllers/
-│   ├── auth.js              # 登录、会话、同源校验、注销
-│   ├── admin.js             # 旧接口与控制台管理路由
-│   ├── admin-api.js         # 脱敏控制台 API 与写操作
-│   └── sub.js               # 订阅生成和转换
-├── core/proxy.js            # WebSocket 与出站 Socket 生命周期
-├── protocols/
-│   ├── parsers.js           # VLESS、Trojan 解析
-│   └── socks5.js            # 可选 SOCKS5/HTTP 上游
-├── subscriptions/native.js  # 原生 Clash/分享链接与优选 IP 替换
-├── ui/                       # 内置页面、样式、脚本和本地二维码
-└── utils/                    # 地址解析、格式补丁、代理诊断、工具
+├── index.js                  Worker 入口与路由分发
+├── config.js                 配置、KV、派生链接与日志
+├── controllers/              登录、管理 API 与订阅
+├── core/                     Socket 生命周期、拨号、HTTP 隧道与测速处理
+├── protocols/                协议解析与上游适配
+├── subscriptions/native.js  原生 Clash/分享链接与优选 IP 替换
+├── ui/                       自托管页面、样式、脚本与二维码
+└── utils/                    输入解析、安全检查、页面与诊断
+
+workers/clash-sub/            可选的独立 Clash 订阅 Worker
+test/                         Node 测试套件
+scripts/                      专用 Cloudflare 环境验证脚本
+docs/images/                  已脱敏的文档截图
 ```
 
 ## 致谢
 
-本项目受到以下社区工作的启发：
+Re_edgetunnel 参考了 [cmliu/edgetunnel](https://github.com/cmliu/edgetunnel) 与 [zizifn/edgetunnel](https://github.com/zizifn/edgetunnel) 的社区实践。本仓库维护的代码已经模块化，运行时不会拉取这两个上游仓库。
 
-- [cmliu/edgetunnel](https://github.com/cmliu/edgetunnel)
-- [zizifn/edgetunnel](https://github.com/zizifn/edgetunnel)
+## 许可证
 
-当前运行时代码已在本仓库内模块化，不会在运行期间加载上述仓库。
-
-## 许可证与免责声明
-
-许可证见 [LICENSE](LICENSE)。只能将本软件用于合法用途，以及你被授权访问的网络和系统。维护者不对滥用或由此造成的损失负责。
+见 [LICENSE](LICENSE)。项目不提供任何担保；部署安全、合法使用以及 Worker 处理的流量均由部署者负责。

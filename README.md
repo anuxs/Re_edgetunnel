@@ -1,7 +1,7 @@
-# EdgeTunnel
+# Re_edgetunnel
 
 <p align="center">
-  A modular VLESS, Trojan, and Shadowsocks tunnel for Cloudflare Workers.
+  A self-hosted Cloudflare Worker tunnel with a built-in control console, native subscriptions, and preferred-IP exports.
 </p>
 
 <p align="center">
@@ -13,129 +13,128 @@
 
 <p align="center">
   <img alt="Cloudflare Workers" src="https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white">
-  <img alt="Protocols" src="https://img.shields.io/badge/Protocols-VLESS%20%7C%20Trojan%20%7C%20Shadowsocks-2563EB">
-  <img alt="Runtime dependencies" src="https://img.shields.io/badge/Runtime_dependencies-operator_controlled-16A34A">
-  <img alt="License" src="https://img.shields.io/badge/License-see%20LICENSE-64748B">
+  <img alt="Protocols" src="https://img.shields.io/badge/VLESS%20%7C%20Trojan%20%7C%20Shadowsocks-0F766E">
+  <img alt="Administration" src="https://img.shields.io/badge/Admin-self--hosted-2563EB">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-node--test-16A34A">
 </p>
 
+<p align="center">
+  <img src="docs/images/edgetunnel-overview.png" alt="Re_edgetunnel service overview" width="100%">
+</p>
+
+Re_edgetunnel accepts VLESS and Trojan traffic over WebSocket, XHTTP, or gRPC, and Shadowsocks SIP003 AEAD over WebSocket. Outbound TCP connections are opened through Cloudflare's Socket API. The same Worker serves a local administration console for subscriptions, preferred Cloudflare IPs, settings, logs, integrations, backup, and recovery.
+
+No panel, JavaScript bundle, font, QR service, or runtime configuration is downloaded from a third-party host. The Worker code, UI assets, and QR renderer are all shipped in this repository. Optional integrations remain off until the operator supplies an endpoint.
+
 > [!IMPORTANT]
-> EdgeTunnel is intended for lawful research, learning, and access to systems you are authorized to use. You are responsible for complying with the laws, Cloudflare terms, and network policies that apply to you.
+> Use this software only for lawful work and for systems and networks you are authorized to access. The operator is responsible for Cloudflare's terms, local law, client configuration, and destination policy.
 
-## What this project is
+## At a glance
 
-EdgeTunnel is a modular Cloudflare Worker that accepts **VLESS and Trojan over WebSocket, XHTTP, or gRPC**, plus **Shadowsocks SIP003 AEAD over WebSocket**. It opens outbound TCP connections with Cloudflare's Socket API, directly or through an explicitly configured upstream proxy. Configuration, login sessions, address lists, and request logs are stored in a Workers KV namespace that belongs to the operator.
-
-The runtime does not download code or an administrator panel from another GitHub repository or CDN. Optional remote services are disabled until the operator explicitly configures endpoints they control.
-
-### Current status
-
-| Area | Status |
+| Area | Included |
 | --- | --- |
-| VLESS over WebSocket/TLS | Supported |
-| Trojan over WebSocket/TLS | Supported |
-| VLESS/Trojan over XHTTP `stream-one` | Supported; bounded streaming request and response |
-| VLESS/Trojan over gRPC Hunk | Supported; fragmented and coalesced frame decoding |
-| Shadowsocks `aes-128-gcm` / `aes-256-gcm` | Supported over WebSocket with SIP003 AEAD framing |
-| Trojan UDP DNS | Supported when an operator-owned TCP DNS resolver is configured |
-| Outbound TCP through Cloudflare Sockets | Supported |
-| SOCKS5, HTTP, HTTPS upstream proxies | Supported |
-| TURN/TURNS RFC 6062 upstream | Implemented for TCP allocation and connection binding |
-| SSTP upstream | Implemented for TLS + PPP PAP/IPCP + IPv4 inner TCP |
-| Password login, KV sessions, logout | Supported |
-| Token-protected subscriptions | Supported |
-| Local address-list subscription | Supported |
-| Bounded direct/proxy connection racing | Supported; request-scoped, `1`-`4` dials |
-| Local HTTP 204 connectivity-test responder | Supported; no outbound speed-test traffic |
-| Mihomo/Clash, Sing-box, Surge conversion | Optional; requires an operator-owned converter |
-| Self-contained graphical administrator console | Supported; overview, nodes, preferred IPs, settings, logs, integrations, backup, and security |
-| Native Mihomo/Clash and share-link export | Supported; no converter required, with optional preferred-IP substitution |
-| Native QUIC/UDP protocols such as Hysteria2 and TUIC | Not supported by this Worker architecture |
+| Inbound protocols | VLESS, Trojan, Shadowsocks SIP003 AEAD |
+| Transports | WebSocket, XHTTP `stream-one`, gRPC Hunk; Shadowsocks uses WebSocket |
+| Outbound | TCP through `cloudflare:sockets`, direct or through an operator-configured upstream proxy |
+| Native exports | Mihomo/Clash YAML and share links; no public converter required |
+| Preferred IPs | Import local scan results, store them in KV, and generate persistent URLs with `ip`, `port`, and `name` |
+| Administration | Password login, KV sessions, overview, nodes, settings, logs, integrations, backup/restore, logout |
+| Optional upstreams | SOCKS5, HTTP CONNECT, HTTPS CONNECT, TURN/TURNS RFC 6062, SSTP |
+| Not provided | A local ISP scanner, native QUIC/UDP inbound, Hysteria2, TUIC, WireGuard, or VLESS Reality |
 
-> [!NOTE]
-> `/admin` is a self-contained management application bundled into the Worker. It does not load a panel, script, font, QR service, or configuration from a third-party host. The tunnel data path and existing subscription routes remain independent of the UI.
+The console is currently written in Simplified Chinese. Its exports and network protocols are language-neutral; this repository provides English, Chinese, Spanish, and Persian operating guides.
 
-## Architecture and trust boundary
+## How the pieces fit together
 
 ```mermaid
 flowchart LR
-    C["VLESS / Trojan / Shadowsocks client"] -->|"WebSocket, XHTTP, or gRPC"| W["Your Cloudflare Worker"]
-    A["Operator browser"] -->|"/login and /admin"| W
+    C["VLESS / Trojan / Shadowsocks client"] -->|"WS, XHTTP, or gRPC"| W["Your EdgeTunnel Worker"]
+    B["Your browser"] -->|"/login and /admin"| W
     W --> K["Your Workers KV"]
-    W -->|"TCP Socket"| D["Requested destination"]
-    W -. "optional upstream" .-> P["SOCKS5 / HTTP(S) / TURN(S) / SSTP"]
-    W -. "optional, explicitly configured" .-> O["Operator-owned DNS / converter / APIs"]
+    W -->|"TCP Socket"| D["Authorized destination"]
+    S["Local IP scanner"] -->|"Import results"| B
+    W -. "optional" .-> P["Operator-owned upstream proxy"]
+    W -. "optional" .-> O["Operator-owned DNS, converter, or diagnostics"]
 ```
 
-Required runtime services:
+The data path and the control console share one Worker but remain separate routes. Opening `/admin` does not change tunnel forwarding. Preferred-IP exports change the client connection address only; they do not reroute Worker egress.
 
-- Cloudflare Workers.
-- One Workers KV namespace bound as `KV`.
+## Screenshots
 
-Optional integrations, all disabled by default:
+These screenshots were captured from the current source running locally with a synthetic UUID and RFC documentation addresses. They contain no production domain, account identifier, subscription token, or live credential.
 
-- An operator-owned TCP DNS resolver for VLESS and Trojan DNS forwarding.
-- An operator-selected SOCKS5, HTTP(S), TURN(S), or SSTP upstream proxy.
-- An operator-owned subscription converter and conversion configuration.
-- An operator-owned proxy-check endpoint.
-- An operator-owned location-data endpoint.
-- An operator-selected HTTPS DoH endpoint when ECH is enabled.
-- Telegram notifications, a masquerade website, or a Cloudflare usage API.
+### Login
 
-## Before you begin
+<p align="center">
+  <img src="docs/images/edgetunnel-login.png" alt="Local EdgeTunnel login screen" width="480">
+</p>
 
-You need:
+### Preferred-IP library
+
+<p align="center">
+  <img src="docs/images/edgetunnel-preferred-ip.png" alt="Preferred IP import and selection" width="100%">
+</p>
+
+### Node and subscription builder
+
+<p align="center">
+  <img src="docs/images/edgetunnel-node-builder.png" alt="Node and subscription builder using a documentation address" width="100%">
+</p>
+
+## Requirements
 
 - A Cloudflare account with Workers enabled.
-- Node.js and npm.
-- Git.
-- A terminal.
+- A Workers KV namespace dedicated to this deployment.
+- A current Node.js LTS release, npm, and Git.
+- A custom domain in the same Cloudflare account if you want zone-level gRPC support.
+- A compatible client such as Mihomo/Clash for the generated configuration.
 
-Cloudflare recommends installing Wrangler locally in each project. The commands below use `npx`, so the project-local version is selected.
+This project targets Cloudflare Workers because it uses `cloudflare:sockets`. It is not a drop-in Vercel Function or Vercel Edge Function.
 
-## Complete deployment guide
+## Deploy from a clean checkout
 
-### 1. Clone the repository
+### 1. Clone and install
 
 ```bash
 git clone https://github.com/tianrking/Re_edgetunnel.git
 cd Re_edgetunnel
+npm ci
 ```
 
-### 2. Install the current Wrangler CLI locally
+Use a project-local Wrangler installation when you want a pinned deployment tool:
 
 ```bash
 npm install --save-dev wrangler@latest
 npx wrangler --version
 ```
 
-Wrangler 4.x or newer is recommended.
-
-### 3. Sign in to Cloudflare
+### 2. Sign in to the correct Cloudflare account
 
 ```bash
 npx wrangler login
 npx wrangler whoami
 ```
 
-The first command opens a browser authorization page. The second command confirms the active Cloudflare account.
+Always read the `whoami` output before creating KV or deploying. This avoids placing a Worker in the wrong account.
 
-### 4. Create and bind a dedicated KV namespace
+### 3. Create a private Wrangler file
 
-First create a private deployment file. It is ignored by Git, so your KV ID,
-custom domain, and optional Cloudflare account ID are not committed:
+The tracked `wrangler.toml` is a public template. Copy it to the ignored local filename before adding deployment-specific values:
 
 ```bash
 cp wrangler.toml wrangler.local.toml
 # PowerShell: Copy-Item wrangler.toml wrangler.local.toml
 ```
 
-Create a namespace:
+You may change the Worker `name` in `wrangler.local.toml`. Do not commit this local file.
+
+### 4. Create and bind KV
 
 ```bash
 npx wrangler kv namespace create KV
 ```
 
-Wrangler prints an ID. Open `wrangler.local.toml` and replace the placeholder:
+Wrangler prints a namespace ID. Replace the placeholder only in `wrangler.local.toml`:
 
 ```toml
 [[kv_namespaces]]
@@ -143,299 +142,45 @@ binding = "KV"
 id = "paste-your-kv-namespace-id-here"
 ```
 
-The binding name must remain exactly `KV`, because the Worker reads `env.KV`.
+The binding name must remain `KV`. Use separate namespaces for production and testing; sharing KV also shares settings, address lists, logs, and active sessions.
 
-Use a separate namespace for testing and production. Sharing a namespace also shares configuration, sessions, address lists, and logs.
-
-### 5. Validate and create the Worker
-
-Run the automated checks first:
+### 5. Run the local checks and deploy
 
 ```bash
-npm test
 npm run check
-```
-
-Perform a deployment dry run, then deploy:
-
-```bash
+npm test
 npx wrangler deploy --dry-run --config wrangler.local.toml
 npx wrangler deploy --config wrangler.local.toml
 ```
 
-The first deployment creates the Worker. Until `ADMIN` is configured, HTTP requests intentionally return `503 Administrator password is not configured.`
+Before `ADMIN` is configured, normal HTTP requests intentionally return `503 Administrator password is not configured.`
 
-### 6. Set the administrator password as a Cloudflare Secret
+### 6. Store the two required credentials as Secrets
 
-Generate a strong value locally if needed:
+Generate an administrator password and a separate RFC 4122 version-4 UUID locally:
 
 ```bash
 node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
-```
-
-Store it interactively. Do not put the value in source code or `wrangler.toml`.
-
-```bash
-npx wrangler secret put ADMIN --config wrangler.local.toml
-```
-
-Wrangler prompts for the value without requiring it in the command line. `secret put` creates and immediately deploys a new Worker version.
-
-### 7. Set a separate RFC 4122 version-4 UUID
-
-The UUID is the VLESS credential and is also used as the Trojan password. Generate one:
-
-```bash
 node -e "console.log(require('node:crypto').randomUUID())"
 ```
 
-Store it as a secret:
+Enter each value at Wrangler's interactive prompt:
 
 ```bash
+npx wrangler secret put ADMIN --config wrangler.local.toml
 npx wrangler secret put UUID --config wrangler.local.toml
-```
-
-Use different values for `ADMIN` and `UUID`. Rotating `UUID` immediately invalidates old node links and subscriptions.
-
-Confirm that both secret names exist:
-
-```bash
 npx wrangler secret list --config wrangler.local.toml
 ```
 
-Cloudflare displays secret names, not their values.
+- `ADMIN` is the password for `/login`.
+- `UUID` is the VLESS credential and the Trojan/Shadowsocks password used in generated nodes.
+- The subscription `TOKEN` is not the administrator password. It is derived from the active hostname and UUID.
 
-### 8. Open the deployed Worker
+Use different values for `ADMIN` and `UUID`. Rotating `ADMIN` does not change nodes. Rotating `UUID` invalidates existing nodes and changes the subscription token.
 
-Wrangler prints a URL similar to:
+### 7. Add a custom domain, if needed
 
-```text
-https://edgetunnel.<your-workers-subdomain>.workers.dev
-```
-
-The root path normally displays an nginx-style camouflage page. This is expected. Open the login page instead:
-
-```text
-https://edgetunnel.<your-workers-subdomain>.workers.dev/login
-```
-
-Sign in with the `ADMIN` value, then open `/admin`.
-
-## First use: obtain a node and subscription
-
-### Obtain nodes and subscriptions from the console
-
-After logging in:
-
-1. Open `/admin`.
-2. Open **Nodes & subscriptions**.
-3. Copy a VLESS, Trojan, or Shadowsocks URI, show its local QR code, or download the native Mihomo/Clash YAML.
-4. Import the result into a compatible client.
-
-The console generates WebSocket, XHTTP, and gRPC entries according to the enabled transports. Credentials are never displayed as a separate plaintext field, but they are necessarily present in copied node URIs and protected subscription output.
-
-### Build the subscription URL
-
-The console displays ready-to-copy native subscription URLs. For legacy or automated administration, the unique `TOKEN` property is also available from the authenticated `/admin/config.json` endpoint:
-
-```text
-https://YOUR_WORKER_HOST/sub?token=YOUR_TOKEN
-```
-
-Treat the subscription URL as a password. Anyone who has it can retrieve the generated nodes.
-
-### Subscription output formats
-
-| Requested output | URL suffix | Requirements |
-| --- | --- | --- |
-| Raw URI list in a browser | `/sub?token=TOKEN` | No external service |
-| Base64 URI subscription | `/sub?token=TOKEN&base64` | No external service |
-| Native Mihomo/Clash YAML | `/sub?token=TOKEN&format=clash` | No external service |
-| Native share-link text | `/sub?token=TOKEN&format=links` | No external service |
-| Native Clash using a preferred IP | `/sub?token=TOKEN&format=clash&ip=104.18.35.249` | A locally tested Cloudflare IPv4 or IPv6 address |
-| Legacy converted Mihomo/Clash YAML | `/sub?token=TOKEN&clash` | Operator-owned `SUBAPI` and `SUBCONFIG` |
-| Sing-box JSON | `/sub?token=TOKEN&singbox` | Operator-owned `SUBAPI` and `SUBCONFIG` |
-| Surge configuration | `/sub?token=TOKEN&surge` | Operator-owned `SUBAPI` and `SUBCONFIG` |
-| Quantumult X conversion | `/sub?token=TOKEN&quanx` | Operator-owned `SUBAPI` and `SUBCONFIG` |
-| Loon conversion | `/sub?token=TOKEN&loon` | Operator-owned `SUBAPI` and `SUBCONFIG` |
-
-For native output, optional parameters are `ip`, `port`, `name`, and `download=1`. A preferred IP changes only the node's connection `server` and optional `port`; TLS `servername`/SNI, HTTP `Host`, tunnel path, and credentials continue to identify the Worker hostname. The console validates IPv4/IPv6 input and can store up to 128 local scan results in the current deployment's KV.
-
-The console does not scan the local ISP path from Cloudflare. Run an IP latency scanner on the client network, import its results, and test the generated node in the actual client. Mihomo, Sing-box, Surge, Quantumult X, and Loon remain **client configuration formats**, not additional Worker inbound protocols. A legacy conversion request returns HTTP 501 when the operator has not configured a converter; the native `format=clash` and `format=links` outputs never require one.
-
-## Optional standalone Clash subscription Worker
-
-The repository also includes an optional companion Worker that generates a
-password-protected Mihomo/Clash YAML file and share links directly, without a
-public subscription converter. It is a separate deployment and must be
-configured with your own tunnel hostname and Cloudflare secrets.
-
-Follow the complete generic guide in
-[workers/clash-sub/README.md](workers/clash-sub/README.md). Keep account IDs,
-KV IDs, custom domains, UUIDs, passwords, and subscription tokens in ignored
-local configuration or Cloudflare Secrets; never add a per-account Wrangler
-file to the repository.
-
-## Using the administrator console
-
-The administrator routes require a valid KV-backed session. A session expires after 24 hours; logout revokes it immediately.
-
-| Route | Method | Purpose |
-| --- | --- | --- |
-| `/login` | GET, POST | Display the local login form and create a session |
-| `/admin` | GET | Display the self-contained responsive administrator console |
-| `/admin/api/bootstrap` | GET | Read the sanitized console model, native exports, preferred IPs, and recent logs |
-| `/admin/api/preview` | GET | Preview nodes and exports for the Worker hostname or a validated preferred IP |
-| `/admin/api/settings` | POST | Save the UI-managed subscription settings while preserving unrelated configuration |
-| `/admin/api/preferred-ips` | POST | Import, normalize, deduplicate, and save preferred IPv4/IPv6 results |
-| `/admin/api/backup` | GET | Export UI settings and preferred IPs without administrator, UUID, token, or integration secrets |
-| `/admin/api/restore` | POST | Restore a validated console backup |
-| `/admin/config.json` | GET | Read the effective configuration, generated `LINK`, and subscription token |
-| `/admin/config.json` | POST | Save configuration JSON to KV |
-| `/admin/ADD.txt` | GET | Read the saved address list or a locally generated fallback list |
-| `/admin/ADD.txt` | POST | Save an operator-controlled address list to KV |
-| `/admin/log.json` | GET | Read request logs |
-| `/admin/init` | POST | Reset `config.json` to defaults; does not erase the address list or logs |
-| `/admin/check` | GET | Test an upstream SOCKS5/HTTP proxy against the configured operator-owned endpoint |
-| `/logout` | GET | Revoke the current session and clear the cookie |
-
-All configuration-changing POST requests require a same-origin `Origin` or `Referer` header. This is a CSRF protection, not an error.
-
-### Edit configuration from the browser
-
-Use **Service settings** in `/admin` for the subscription name, tunnel path, transports, TLS fingerprint, refresh interval, Shadowsocks, 0-RTT, and certificate-verification behavior. The page also provides safe backup/restore and a UI-only default reset. The reset preserves unrelated operator configuration, preferred IPs, `ADMIN`, and `UUID`.
-
-The raw endpoint below remains available for advanced or backward-compatible administration.
-
-The stored JSON schema retains legacy internal property names for backward compatibility. To keep this guide language-neutral and avoid typing those names manually, the example below locates the subscription object through its stable ASCII properties.
-
-Log in, open `/admin`, open the browser developer console, and run:
-
-```js
-const config = await fetch('/admin/config.json').then((response) => response.json());
-
-const subscription = Object.values(config).find((value) =>
-  value && typeof value === 'object' &&
-  typeof value.TOKEN === 'string' &&
-  typeof value.SUBNAME === 'string'
-);
-
-if (!subscription) throw new Error('Subscription settings were not found');
-
-// Example: change the display name without depending on localized JSON keys.
-subscription.SUBNAME = 'my-edgetunnel';
-
-const response = await fetch('/admin/config.json', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(config),
-});
-
-console.log(response.status, await response.text());
-```
-
-A successful save returns `{"success":true}`. Refresh `/admin/config.json` to confirm the effective value.
-
-### Save your own address list
-
-Accepted line format:
-
-```text
-hostname-or-ip:port#display name
-```
-
-Examples:
-
-```text
-example.com:443#Primary
-203.0.113.10:443#IPv4 example
-[2001:db8::10]:443#IPv6 example
-```
-
-The documentation addresses above are examples; replace them with endpoints you are authorized to use. Invalid lines and ports outside `1-65535` are ignored.
-
-From the same authenticated browser console:
-
-```js
-const addresses = `example.com:443#Primary
-203.0.113.10:443#Backup`;
-
-const response = await fetch('/admin/ADD.txt', {
-  method: 'POST',
-  headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-  body: addresses,
-});
-
-console.log(response.status, await response.text());
-```
-
-### Reset the main configuration
-
-```js
-const response = await fetch('/admin/init', { method: 'POST' });
-console.log(response.status, await response.text());
-```
-
-This replaces `config.json` with defaults. It does not delete `ADD.txt`, logs, active sessions, Telegram settings, or saved Cloudflare usage settings.
-
-## Important configuration settings
-
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| Generated node protocol | `vless` | Selects VLESS or Trojan links |
-| Supported protocols | VLESS and Trojan | Informational capability list enforced by the runtime |
-| Transport | WebSocket | Client-to-Worker transport |
-| Host list | Current Worker host | Hostnames used when generating subscriptions |
-| Skip certificate verification | Disabled | Disables client certificate verification when enabled; not recommended |
-| 0-RTT | Disabled | Adds WebSocket early-data query data to generated paths |
-| Random path mode | Disabled | Uses `/` in locally generated subscription nodes when enabled |
-| TLS fingerprint | `chrome` | Client TLS fingerprint hint |
-| ECH | Disabled | Generates ECH client settings only when an HTTPS DoH endpoint is supplied |
-| Local subscription generation | Enabled | Generates subscriptions from the local KV address list |
-| Subscription name | `edgetunnel` | Subscription and node display name; stored as `SUBNAME` |
-| Subscription update interval | 3 hours | Suggested client refresh interval; stored as `SUBUpdateTime` |
-| Locally generated address count | `16` | Number of fallback addresses when no list is saved |
-| Converter API | Not configured | Operator-owned converter base URL; stored as `SUBAPI` |
-| Converter configuration | Not configured | Operator-owned HTTPS converter configuration; stored as `SUBCONFIG` |
-| Sing-box rule-set base | Not configured | Operator-owned `.srs` rule-set base URL |
-| Client DNS list | Empty | Resolvers explicitly inserted into generated Clash configuration |
-| Telegram notifications | Disabled | Sends request notifications after credentials are configured |
-
-`HOST`, `UUID`, `PATH`, `LINK`, `TOKEN`, timestamps, usage data, and load timing are runtime-derived values. The Worker can overwrite them when reading the saved JSON.
-
-## Deployment variables and optional integrations
-
-Sensitive values must be stored with `wrangler secret put`. Non-secret operator settings may be placed under `[vars]` in `wrangler.toml`.
-
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `ADMIN` | Yes | Administrator password; store as a Secret |
-| `UUID` | Strongly recommended | RFC 4122 v4 VLESS/Trojan credential; store as a Secret |
-| `KEY` | No | Additional secret input and optional private subscription shortcut; store as a Secret |
-| `HOST` | No | Comma/newline-separated hostnames used in generated subscriptions |
-| `URL` | No | Root-path camouflage: `nginx`, `1101`, or an explicit HTTPS origin |
-| `PROXYIP` | No | Operator-selected TCP fallback proxy address |
-| `UPSTREAM_PROXY` | No | Absolute `socks5://`, `http://`, `https://`, `turn://`, `turns://`, or `sstp://` upstream URL |
-| `TCP_CONCURRENT_DIAL` | No | Direct TCP race width, clamped to `1`-`4`; default `1` |
-| `PROXY_CONCURRENT_DIAL` | No | Proxy-candidate race width, clamped to `1`-`4`; default `1` |
-| `SPEEDTEST_MODE` | No | `local` (default) returns bounded local HTTP 204 responses; `block` closes the tunnel |
-| `SPEEDTEST_DOMAINS` | No | Comma/newline-separated local-test domains; defaults to `speed.cloudflare.com` and `cp.cloudflare.com` |
-| `DNS_RESOLVER` | No | Operator-owned TCP DNS resolver for VLESS/Trojan DNS and TURN/SSTP target resolution |
-| `DNS_RESOLVER_PORT` | No | DNS resolver port, default `53` |
-| `PROXY_CHECK_HOST` | No | Operator-owned HTTP endpoint host used for proxy tests |
-| `PROXY_CHECK_PORT` | No | Proxy-check endpoint port, default `80` |
-| `PROXY_CHECK_PATH` | No | Proxy-check HTTP path, default `/` |
-| `LOCATIONS_API` | No | Operator-owned HTTPS location-data endpoint |
-| `ECH_DOH_URL` | No | Explicit HTTPS DoH endpoint used only for ECH lookup |
-| `ALLOW_REMOTE_USAGE_API` | No | Must equal `true` before a saved remote usage URL may be requested |
-
-If an optional endpoint is absent, the related feature is disabled. The Worker does not select a hidden public fallback.
-
-Dial settings are parsed per request, never retained as mutable cross-request state. Local speed-test mode opens no outbound socket, accepts split or keep-alive HTTP requests, and enforces header, body, pipeline, and buffer limits.
-
-## Custom domain
-
-Add a domain already managed in your Cloudflare account:
+Add the route only to `wrangler.local.toml`:
 
 ```toml
 routes = [
@@ -443,170 +188,309 @@ routes = [
 ]
 ```
 
-Redeploy:
+Deploy again:
 
 ```bash
-npx wrangler deploy
+npx wrangler deploy --config wrangler.local.toml
 ```
 
-After changing the hostname, retrieve `/admin/config.json` again. Subscription tokens are derived from the hostname and UUID, so the old hostname's token is not valid on the new hostname.
+For gRPC, enable gRPC in the Cloudflare zone's Network settings and keep the client SNI/servername on the custom hostname. A `workers.dev` hostname and a custom hostname produce different subscription tokens.
 
-## Updating and rolling back
+### 8. Log in
 
-Update from GitHub and validate before deployment:
+Open:
 
-```bash
-git pull --ff-only
-npm test
-npm run check
-npx wrangler deploy --dry-run
-npx wrangler deploy
+```text
+https://tunnel.example.com/login
 ```
 
-Inspect recent versions or roll back with Wrangler:
+Sign in with the value stored in `ADMIN`. The root URL normally shows an nginx-style camouflage page; that is expected.
 
-```bash
-npx wrangler versions list
-npx wrangler rollback
+## First use
+
+### Get a native Clash subscription
+
+After login:
+
+1. Open **Nodes & subscriptions**.
+2. Leave the preferred IP empty to use the Worker hostname, or select an address imported from your local scan.
+3. Generate the preview.
+4. Copy the refreshable URL or download Mihomo/Clash YAML.
+5. Import it into the client and test the actual route.
+
+Native endpoints:
+
+| Output | URL |
+| --- | --- |
+| Raw URI list | `/sub?token=TOKEN` |
+| Base64 URI list | `/sub?token=TOKEN&base64` |
+| Mihomo/Clash YAML | `/sub?token=TOKEN&format=clash` |
+| Share-link text | `/sub?token=TOKEN&format=links` |
+| Clash with a preferred address | `/sub?token=TOKEN&format=clash&ip=IP` |
+| Download instead of inline display | Add `&download=1` |
+
+Native preferred-IP parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `ip` | Valid IPv4 or IPv6 connection address |
+| `port` | Optional port from `1` to `65535`; default `443` |
+| `name` | Optional node label, limited and sanitized by the Worker |
+
+Treat every subscription URL as a credential. Do not paste it into an issue, screenshot, analytics service, or public converter.
+
+### Use a locally scanned Cloudflare IP
+
+The Worker cannot measure the path between your ISP and Cloudflare. Run the scanner on the device or network that will use the tunnel, then import the result into `/admin`.
+
+Accepted import lines:
+
+```text
+IP
+IP:PORT
+IP:PORT#LABEL
+IP:PORT#LABEL,28ms
+[IPv6]:PORT#LABEL,42ms
 ```
 
-Back up important KV values before destructive configuration changes. At minimum, save `config.json` and `ADD.txt` from the authenticated administrator routes.
+Documentation-only examples:
+
+```text
+198.51.100.42:443#Example-v4,28ms
+[2001:db8::42]:443#Example-v6,42ms
+```
+
+When `ip` is used, Re_edgetunnel changes only the generated node's `server` and optional `port`:
+
+| Field | Result |
+| --- | --- |
+| `server` / connection address | Replaced with the selected IP |
+| TLS `servername` / SNI | Keeps the Worker hostname |
+| WebSocket `Host` | Keeps the Worker hostname |
+| XHTTP `host` | Keeps the Worker hostname |
+| gRPC service name | Keeps the configured tunnel path without the leading slash |
+| UUID/password and path | Unchanged |
+
+Changing `server`, SNI, Host, and path to the same IP breaks Cloudflare routing. The IP is only the edge connection target; the hostname still identifies your Worker.
+
+## Administration console
+
+The console uses a random 256-bit session token stored as a SHA-256-derived key in KV. Its cookie is `HttpOnly`, `Secure`, and `SameSite=Strict`. Sessions expire after 24 hours; logout revokes the active session immediately.
+
+| Section | What it does |
+| --- | --- |
+| Overview | Shows protocol/transport status, host, tunnel path, masked credential, recent subscription count, and preferred-IP count |
+| Nodes & subscriptions | Builds VLESS, Trojan, and Shadowsocks nodes; renders local QR codes; exports links and Clash YAML |
+| Preferred IP | Imports, validates, deduplicates, stores, selects, and deletes up to 128 IPv4/IPv6 results |
+| Service settings | Changes subscription name, tunnel path, transports, fingerprint, refresh interval, certificate policy, 0-RTT, and Shadowsocks settings |
+| Access logs | Reads KV-backed request records with credential-bearing query parameters removed |
+| Integrations & diagnostics | Displays explicitly configured converter, proxy check, usage API, DNS, ECH, Telegram, and masquerade options |
+| Security | Exports a secret-free backup, restores validated settings, and resets UI-managed defaults |
+
+Important routes:
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/login` | GET, POST | Create an administrator session |
+| `/admin` | GET | Load the self-contained console |
+| `/admin/api/bootstrap` | GET | Return the sanitized console model and native exports |
+| `/admin/api/preview` | GET | Preview nodes for the hostname or a preferred IP |
+| `/admin/api/settings` | POST | Save UI-managed settings without discarding unrelated configuration |
+| `/admin/api/preferred-ips` | POST | Import and store local scan results |
+| `/admin/api/backup` | GET | Export settings and IPs without administrator, UUID, token, or integration secrets |
+| `/admin/api/restore` | POST | Restore a validated console backup |
+| `/admin/config.json` | GET, POST | Advanced access to the effective legacy-compatible configuration |
+| `/admin/ADD.txt` | GET, POST | Read or replace the operator-owned address list |
+| `/admin/log.json` | GET | Read request logs |
+| `/admin/init` | POST | Reset `config.json`; does not erase address lists or logs |
+| `/admin/check` | GET | Test an explicitly configured SOCKS5/HTTP upstream |
+| `/logout` | GET | Revoke the current session |
+
+Configuration-changing POST requests require a same-origin `Origin` or `Referer` header as CSRF protection.
+
+## Runtime configuration
+
+Keep secrets in Cloudflare Secrets. Put non-sensitive values in the ignored `wrangler.local.toml` only when they must be deployment-specific.
+
+| Variable | Recommended storage | Purpose |
+| --- | --- | --- |
+| `ADMIN` | Secret; required | Administrator password |
+| `UUID` | Secret; strongly recommended | Canonical v4 UUID used by generated nodes |
+| `KEY` | Secret; optional | Additional private shortcut path and legacy secret key |
+| `HOST` | Variable; optional | Override generated host list |
+| `PATH` | Variable; optional | Tunnel path; default `/tunnel` |
+| `URL` | Variable; optional | Root camouflage: `nginx`, `1101`, or an explicit HTTPS origin |
+| `PROXYIP` | Variable or Secret | Operator-selected fallback proxy IP |
+| `UPSTREAM_PROXY` | Secret when credentialed | `socks5://`, `http://`, `https://`, `turn://`, `turns://`, or `sstp://` upstream |
+| `TCP_CONCURRENT_DIAL` | Variable | Direct connection race width, clamped to `1`-`4` |
+| `PROXY_CONCURRENT_DIAL` | Variable | Proxy candidate race width, clamped to `1`-`4` |
+| `SPEEDTEST_MODE` | Variable | `local` returns bounded local HTTP 204 responses; `block` closes the test tunnel |
+| `SPEEDTEST_DOMAINS` | Variable | Domains handled by the local connectivity-test path |
+| `DNS_RESOLVER` / `DNS_RESOLVER_PORT` | Variable | Operator-owned TCP DNS for supported DNS forwarding and TURN/SSTP resolution |
+| `PROXY_CHECK_HOST` / `PORT` / `PATH` | Variable | Operator-owned HTTP endpoint used by proxy diagnostics |
+| `LOCATIONS_API` | Variable | Operator-owned HTTPS location data endpoint |
+| `ECH_DOH_URL` | Variable | Explicit HTTPS DoH endpoint used only when ECH is enabled |
+| `ALLOW_REMOTE_USAGE_API` | Variable | Must be `true` before a stored remote Cloudflare usage API is called |
+
+Legacy aliases such as `PASSWORD` or `TOKEN` are accepted for compatibility, but new deployments should use `ADMIN`. Do not place any credential, Cloudflare account ID, KV namespace ID, private domain, or generated subscription URL in a tracked file.
+
+## Optional subscription conversion
+
+Native `format=clash` and `format=links` exports never require a converter. Legacy client-format requests are available only after you configure your own HTTPS converter and configuration URL:
+
+| Request | External requirement |
+| --- | --- |
+| `?clash` | Operator-owned `SUBAPI` and `SUBCONFIG` |
+| `?singbox` | Operator-owned `SUBAPI` and `SUBCONFIG` |
+| `?surge` | Operator-owned `SUBAPI` and `SUBCONFIG` |
+| `?quanx` | Operator-owned `SUBAPI` and `SUBCONFIG` |
+| `?loon` | Operator-owned `SUBAPI` and `SUBCONFIG` |
+
+Without those values the Worker returns HTTP 501 instead of silently sending the subscription to a public service.
+
+## Optional standalone Clash Worker
+
+`workers/clash-sub` is a separate, password-protected Worker that can publish a Clash-only subscription for one EdgeTunnel hostname. It has its own generic Wrangler template and requires these Secrets:
+
+- `SECRET_TOKEN`
+- `PAGE_PASSWORD`
+- `CLOUDFLARE_UUID`
+
+It also requires `CLOUDFLARE_HOST`, and the UUID must match the main Worker. See [workers/clash-sub/README.md](workers/clash-sub/README.md). Do not copy a personal deployment file into the repository.
 
 ## Protocol boundaries
 
 Supported:
 
-- VLESS and Trojan over WebSocket, XHTTP `stream-one`, and gRPC Hunk, with TLS termination at Cloudflare.
-- Shadowsocks SIP003 AEAD using `aes-128-gcm` or `aes-256-gcm` over WebSocket.
-- TCP destinations reachable through Cloudflare's outbound Socket API.
-- VLESS and Trojan DNS forwarding only when an operator-owned TCP DNS resolver is configured.
-- SOCKS5, HTTP CONNECT, HTTPS CONNECT, TURN/TURNS RFC 6062, and SSTP as optional **upstream** proxies, not inbound client protocols.
+- VLESS over WebSocket, XHTTP `stream-one`, and gRPC Hunk.
+- Trojan over WebSocket, XHTTP at the Worker route, and gRPC Hunk; native Clash export emits the client combinations it can describe safely.
+- Shadowsocks `aes-128-gcm` and `aes-256-gcm` with SIP003 AEAD framing over WebSocket.
+- TCP destinations reachable through Cloudflare's Socket API.
+- VLESS/Trojan DNS when an operator-owned TCP resolver is configured.
+- SOCKS5, HTTP(S) CONNECT, TURN(S) RFC 6062, and SSTP as upstream paths.
 
-Not supported by this Worker:
+Not supported:
 
-- Hysteria2 and TUIC, which require native QUIC/UDP behavior.
-- WireGuard as an inbound tunnel.
-- VLESS Reality, because TLS is terminated by Cloudflare.
-- Native raw-TCP ingress or a generic HTTP forward proxy.
-- Arbitrary UDP forwarding; only explicitly configured VLESS/Trojan DNS is handled.
+- Hysteria2 or TUIC, because they require native QUIC/UDP.
+- WireGuard inbound.
+- VLESS Reality, because Cloudflare terminates TLS.
+- Arbitrary UDP forwarding; the implemented UDP case is configured VLESS/Trojan DNS.
+- A native TCP listener or a general-purpose HTTP forward proxy.
 
-TURN support is intentionally scoped to RFC 6062 TCP allocation. SSTP support is scoped to TLS, PPP PAP/IPCP, IPv4, and inner TCP. Servers requiring other authentication methods, IPv6CP, MPPE, or vendor extensions are outside this implementation.
+TURN is limited to RFC 6062 TCP allocation and connection binding. SSTP is limited to TLS, PPP PAP/IPCP, IPv4, and inner TCP; it does not claim MPPE, IPv6CP, or vendor-extension coverage.
 
-Adding a client output format does not add a new network protocol to the Worker core.
+## Security and publication checklist
 
-## Security model
+Before every public commit:
 
-- Login sessions use random 256-bit tokens; only SHA-256-derived session keys are stored in KV.
-- Session cookies are `HttpOnly`, `Secure`, and `SameSite=Strict`.
-- Sessions expire after 24 hours and are removed on logout.
-- Administrator mutations require a trusted same-origin request.
-- Subscription endpoints require a token derived from the Worker hostname and UUID.
-- Credentials are removed from stored request-log URLs.
-- Remote runtime integrations are opt-in and require explicit operator configuration.
+- Keep `wrangler.local.toml`, `.dev.vars`, and `.wrangler/` untracked.
+- Store `ADMIN`, `UUID`, proxy credentials, API tokens, and companion-Worker credentials as Secrets.
+- Use reserved examples such as `198.51.100.0/24` and `2001:db8::/32` in documentation.
+- Capture screenshots from a synthetic local deployment, not production.
+- Check the current tree and the full reachable Git history; deleting a secret in a later commit does not remove it from earlier commits.
+- Rotate any credential that was ever committed, even after history is rewritten.
 
-Operational recommendations:
+Request logs remove common credential-bearing query parameters before storage. Backups omit `ADMIN`, UUID, subscription token, sessions, and integration secrets. This reduces accidental disclosure; it does not make a public subscription URL safe to share.
 
-- Never commit `ADMIN`, `UUID`, API tokens, cookies, or subscription URLs.
-- Keep client certificate verification enabled.
-- Use separate Workers and KV namespaces for staging and production.
-- Rotate `ADMIN` after suspected disclosure. Existing sessions remain active until logout or their 24-hour expiry.
-- Rotate `UUID` when a node or subscription leaks; all clients must then import the new link.
-- Protect Cloudflare API tokens with the minimum permissions required.
+## Upgrade and rollback
+
+```bash
+git pull --ff-only
+npm ci
+npm run check
+npm test
+npx wrangler deploy --dry-run --config wrangler.local.toml
+npx wrangler deploy --config wrangler.local.toml
+```
+
+Cloudflare keeps Worker versions:
+
+```bash
+npx wrangler versions list --config wrangler.local.toml
+npx wrangler rollback --config wrangler.local.toml
+```
+
+Export a console backup before changing stored settings. A code rollback does not automatically roll back KV data.
 
 ## Troubleshooting
 
-### The root page only shows “Welcome to nginx”
+### The root page says "Welcome to nginx"
 
-This is the default camouflage page. Open `/login`, not `/`.
-
-### `/admin` redirects to the login page or does not load its assets
-
-Sign in at `/login`, confirm that the `KV` binding is available, and make sure `/assets/edgetunnel-ui.css` and `/assets/edgetunnel-admin.js` are not blocked by a browser extension or an additional reverse proxy. The console itself has no external runtime asset dependency.
+That is the default camouflage page. Open `/login`.
 
 ### `503 Administrator password is not configured`
 
-Set the secret and wait for the new version to deploy:
-
 ```bash
-npx wrangler secret put ADMIN
+npx wrangler secret put ADMIN --config wrangler.local.toml
 ```
 
-### `503` or a message about the KV binding
+### KV binding errors
 
-Confirm that `wrangler.toml` contains a real namespace ID and that the binding is named `KV`.
+Confirm that the namespace ID is real and the binding is exactly `KV`. Confirm that Wrangler is logged into the account that owns the namespace.
 
 ### `403 Invalid Token`
 
-Read the current token from `/admin/config.json`. Confirm that the URL hostname is exactly the same hostname used to retrieve the token. Custom domains and `workers.dev` names have different tokens.
+Copy the subscription URL again from the same hostname. Tokens differ between `workers.dev` and a custom domain, and change after UUID rotation.
 
-### A legacy Clash, Sing-box, or Surge request returns `501`
+### `/admin` returns to the login page
 
-This is expected until the converter-settings object contains both `SUBAPI` and `SUBCONFIG` values pointing to HTTPS services controlled by the operator. Raw, Base64, native `format=clash`, and native `format=links` subscriptions do not need a converter.
+Log in again, confirm the KV binding, and check whether another proxy or extension blocks `/assets/edgetunnel-ui.css` or `/assets/edgetunnel-admin.js`.
 
-### Proxy testing returns `503`
+### gRPC does not connect
 
-Set `PROXY_CHECK_HOST`, `PROXY_CHECK_PORT`, and `PROXY_CHECK_PATH` to your own test endpoint. No public proxy-check service is selected automatically.
+Use a custom domain, enable gRPC for its Cloudflare zone, and keep the client SNI/servername on that hostname. Do not replace SNI with the preferred IP.
 
 ### WebSocket connects but the destination does not respond
 
-Check the UUID/password, TLS host/SNI, WebSocket host and path, destination port, Cloudflare logs, and whether Cloudflare permits the requested outbound destination.
-
-Stream production logs:
+Check UUID/password, SNI, Host, path, destination port, Cloudflare egress restrictions, and Worker logs:
 
 ```bash
-npx wrangler tail
+npx wrangler tail --config wrangler.local.toml
 ```
 
-## Development and verification
+### A legacy conversion returns 501
 
-Run syntax and unit checks:
+Configure an operator-owned `SUBAPI` and `SUBCONFIG`, or use native `format=clash` / `format=links`.
+
+## Development
 
 ```bash
 npm run check
 npm test
 ```
 
-Available Cloudflare verification scripts:
+Optional tests against a dedicated Cloudflare deployment:
 
 ```bash
 npm run test:cloudflare:http
 npm run test:cloudflare
 ```
 
-The Cloudflare scripts require a deliberately created test Worker/KV environment and test credentials. Do not run destructive tests against production data.
+Do not run external protocol tests against production credentials or production KV.
 
-## Project layout
+Project layout:
 
 ```text
 src/
-├── index.js                 # Worker entry point and routing
-├── config.js                # Defaults, KV configuration, links, logs
-├── controllers/
-│   ├── auth.js              # Login, sessions, origin checks, logout
-│   ├── admin.js             # Legacy and console administrator routing
-│   ├── admin-api.js         # Sanitized console API and mutations
-│   └── sub.js               # Subscription generation and conversion
-├── core/
-│   ├── dialer.js            # Bounded connection racing and loser cleanup
-│   ├── proxy.js             # WebSocket and outbound socket lifecycle
-│   └── speedtest.js         # Bounded local HTTP 204 responder
-├── protocols/
-│   ├── parsers.js           # VLESS and Trojan parsing
-│   └── socks5.js            # Optional SOCKS5/HTTP upstream support
-├── subscriptions/native.js  # Native Clash/share links and preferred-IP substitution
-├── ui/                       # Bundled pages, styles, scripts, and local QR rendering
-└── utils/                    # Address parsing, patches, proxy checks, helpers
+├── index.js                  Worker entry and route dispatch
+├── config.js                 Configuration, KV, derived links, and logs
+├── controllers/              Authentication, admin APIs, and subscriptions
+├── core/                     Socket lifecycle, dialing, HTTP tunnels, speed tests
+├── protocols/                Protocol parsing and upstream adapters
+├── subscriptions/native.js  Native Clash/share links and preferred-IP substitution
+├── ui/                       Self-hosted pages, styles, scripts, and QR rendering
+└── utils/                    Input parsing, safety checks, pages, and diagnostics
+
+workers/clash-sub/            Optional standalone Clash subscription Worker
+test/                         Node test suite
+scripts/                      Dedicated Cloudflare verification scripts
+docs/images/                  Sanitized documentation screenshots
 ```
 
-## Acknowledgements
+## Credits
 
-The implementation was inspired by community work, especially:
+Re_edgetunnel builds on ideas from [cmliu/edgetunnel](https://github.com/cmliu/edgetunnel) and [zizifn/edgetunnel](https://github.com/zizifn/edgetunnel). The maintained code in this repository is modular and does not fetch either upstream repository at runtime.
 
-- [cmliu/edgetunnel](https://github.com/cmliu/edgetunnel)
-- [zizifn/edgetunnel](https://github.com/zizifn/edgetunnel)
+## License
 
-The current runtime is modularized in this repository and does not load those repositories at runtime.
-
-## License and disclaimer
-
-See [LICENSE](LICENSE). Use this software only for legal purposes and on networks and systems you are authorized to access. The maintainers are not responsible for misuse or resulting loss.
+See [LICENSE](LICENSE). No warranty is provided. Operators remain responsible for deployment security, lawful use, and any traffic handled by their Worker.
