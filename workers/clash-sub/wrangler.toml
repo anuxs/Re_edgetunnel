@@ -1,0 +1,9 @@
+name = "example-clash-sub"
+main = "index.js"
+compatibility_date = "2026-08-09"
+
+[observability]
+enabled = true
+
+[observability.logs]
+head_sampling_rate = 0.1
