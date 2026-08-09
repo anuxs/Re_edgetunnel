@@ -11,6 +11,7 @@ import { parseSpeedTestDomains, parseSpeedTestMode } from './core/speedtest.js';
 import { handleGrpcRequest, handleXHttpRequest } from './core/http-tunnel.js';
 import { parseUpstreamProxy } from './protocols/upstream.js';
 import { looksLikeGrpcPayload } from './protocols/grpc.js';
+import { apiSecurityHeaders, uiAssetResponse } from './ui/assets.js';
 
 export default {
     async fetch(request, env, ctx) {
@@ -79,6 +80,12 @@ export default {
         // --- HTTP Handling ---
         if (url.protocol === 'http:') return Response.redirect(url.href.replace('http:', 'https:'), 301);
 
+        const uiAsset = uiAssetResponse(pathLower);
+        if (uiAsset) {
+            if (!['GET', 'HEAD'].includes(request.method)) return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
+            return request.method === 'HEAD' ? new Response(null, { status: 200, headers: uiAsset.headers }) : uiAsset;
+        }
+
         if (!adminPassword) return new Response('Administrator password is not configured.', { status: 503 });
 
         const contentType = request.headers.get('content-type')?.toLowerCase() || '';
@@ -109,7 +116,15 @@ export default {
             }
             if (pathLower === 'admin' || pathLower.startsWith('admin/')) {
                 const auth = await checkAuth(request, env);
-                if (!auth) return new Response('Redir...', { status: 302, headers: { 'Location': '/login' } });
+                if (!auth) {
+                    if (pathLower.startsWith('admin/api/')) {
+                        return new Response(JSON.stringify({ success: false, error: 'Authentication required' }), {
+                            status: 401,
+                            headers: apiSecurityHeaders(),
+                        });
+                    }
+                    return new Response('Redir...', { status: 302, headers: { 'Location': '/login' } });
+                }
                 const config = await readConfig(env, url.hostname, userID, path);
                 return handleAdmin(request, env, config, pathLower);
             }

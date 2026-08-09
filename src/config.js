@@ -237,8 +237,8 @@ export async function logRequest(env, request, accessIP, type = "Get_SUB", confi
         const logContent = {
             TYPE: type,
             IP: accessIP,
-            ASN: `AS${request.cf.asn || '0'} ${request.cf.asOrganization || 'Unknown'}`,
-            CC: `${request.cf.country || 'N/A'} ${request.cf.city || 'N/A'}`,
+            ASN: `AS${request.cf?.asn || '0'} ${request.cf?.asOrganization || 'Unknown'}`,
+            CC: `${request.cf?.country || 'N/A'} ${request.cf?.city || 'N/A'}`,
             URL: sanitizeLogUrl(request.url),
             UA: request.headers.get('User-Agent') || 'Unknown',
             TIME: now.getTime()

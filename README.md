@@ -47,11 +47,12 @@ The runtime does not download code or an administrator panel from another GitHub
 | Bounded direct/proxy connection racing | Supported; request-scoped, `1`-`4` dials |
 | Local HTTP 204 connectivity-test responder | Supported; no outbound speed-test traffic |
 | Mihomo/Clash, Sing-box, Surge conversion | Optional; requires an operator-owned converter |
-| Graphical administrator console | Not implemented yet; the current page exposes local JSON/text endpoints |
+| Self-contained graphical administrator console | Supported; overview, nodes, preferred IPs, settings, logs, integrations, backup, and security |
+| Native Mihomo/Clash and share-link export | Supported; no converter required, with optional preferred-IP substitution |
 | Native QUIC/UDP protocols such as Hysteria2 and TUIC | Not supported by this Worker architecture |
 
 > [!NOTE]
-> `/admin` is intentionally a small, self-contained page today. It does **not** contain a graphical node editor. This README explains how to retrieve and update the current configuration without relying on a third-party panel.
+> `/admin` is a self-contained management application bundled into the Worker. It does not load a panel, script, font, QR service, or configuration from a third-party host. The tunnel data path and existing subscription routes remain independent of the UI.
 
 ## Architecture and trust boundary
 
@@ -222,21 +223,20 @@ Sign in with the `ADMIN` value, then open `/admin`.
 
 ## First use: obtain a node and subscription
 
-### Obtain the single-node URI
+### Obtain nodes and subscriptions from the console
 
 After logging in:
 
 1. Open `/admin`.
-2. Select **Configuration JSON**.
-3. Find the top-level `LINK` field.
-4. Copy the complete `vless://...` or `trojan://...` URI.
-5. Import it into a compatible client.
+2. Open **Nodes & subscriptions**.
+3. Copy a VLESS, Trojan, or Shadowsocks URI, show its local QR code, or download the native Mihomo/Clash YAML.
+4. Import the result into a compatible client.
 
-The default protocol is VLESS. The URI contains the Worker hostname, TLS settings, WebSocket transport, path, and UUID.
+The console generates WebSocket, XHTTP, and gRPC entries according to the enabled transports. Credentials are never displayed as a separate plaintext field, but they are necessarily present in copied node URIs and protected subscription output.
 
 ### Build the subscription URL
 
-In the same configuration JSON, search for the unique `TOKEN` property inside the subscription-settings object. Build the URL with that value:
+The console displays ready-to-copy native subscription URLs. For legacy or automated administration, the unique `TOKEN` property is also available from the authenticated `/admin/config.json` endpoint:
 
 ```text
 https://YOUR_WORKER_HOST/sub?token=YOUR_TOKEN
@@ -250,13 +250,18 @@ Treat the subscription URL as a password. Anyone who has it can retrieve the gen
 | --- | --- | --- |
 | Raw URI list in a browser | `/sub?token=TOKEN` | No external service |
 | Base64 URI subscription | `/sub?token=TOKEN&base64` | No external service |
-| Mihomo/Clash YAML | `/sub?token=TOKEN&clash` | Operator-owned `SUBAPI` and `SUBCONFIG` |
+| Native Mihomo/Clash YAML | `/sub?token=TOKEN&format=clash` | No external service |
+| Native share-link text | `/sub?token=TOKEN&format=links` | No external service |
+| Native Clash using a preferred IP | `/sub?token=TOKEN&format=clash&ip=104.18.35.249` | A locally tested Cloudflare IPv4 or IPv6 address |
+| Legacy converted Mihomo/Clash YAML | `/sub?token=TOKEN&clash` | Operator-owned `SUBAPI` and `SUBCONFIG` |
 | Sing-box JSON | `/sub?token=TOKEN&singbox` | Operator-owned `SUBAPI` and `SUBCONFIG` |
 | Surge configuration | `/sub?token=TOKEN&surge` | Operator-owned `SUBAPI` and `SUBCONFIG` |
 | Quantumult X conversion | `/sub?token=TOKEN&quanx` | Operator-owned `SUBAPI` and `SUBCONFIG` |
 | Loon conversion | `/sub?token=TOKEN&loon` | Operator-owned `SUBAPI` and `SUBCONFIG` |
 
-Mihomo, Sing-box, Surge, Quantumult X, and Loon are **client configuration formats**, not additional Worker inbound protocols. If conversion is not configured, the Worker returns HTTP 501 instead of silently contacting a public converter.
+For native output, optional parameters are `ip`, `port`, `name`, and `download=1`. A preferred IP changes only the node's connection `server` and optional `port`; TLS `servername`/SNI, HTTP `Host`, tunnel path, and credentials continue to identify the Worker hostname. The console validates IPv4/IPv6 input and can store up to 128 local scan results in the current deployment's KV.
+
+The console does not scan the local ISP path from Cloudflare. Run an IP latency scanner on the client network, import its results, and test the generated node in the actual client. Mihomo, Sing-box, Surge, Quantumult X, and Loon remain **client configuration formats**, not additional Worker inbound protocols. A legacy conversion request returns HTTP 501 when the operator has not configured a converter; the native `format=clash` and `format=links` outputs never require one.
 
 ## Optional standalone Clash subscription Worker
 
@@ -271,14 +276,20 @@ KV IDs, custom domains, UUIDs, passwords, and subscription tokens in ignored
 local configuration or Cloudflare Secrets; never add a per-account Wrangler
 file to the repository.
 
-## Using the current administrator page
+## Using the administrator console
 
 The administrator routes require a valid KV-backed session. A session expires after 24 hours; logout revokes it immediately.
 
 | Route | Method | Purpose |
 | --- | --- | --- |
 | `/login` | GET, POST | Display the local login form and create a session |
-| `/admin` | GET | Display the minimal local administrator index |
+| `/admin` | GET | Display the self-contained responsive administrator console |
+| `/admin/api/bootstrap` | GET | Read the sanitized console model, native exports, preferred IPs, and recent logs |
+| `/admin/api/preview` | GET | Preview nodes and exports for the Worker hostname or a validated preferred IP |
+| `/admin/api/settings` | POST | Save the UI-managed subscription settings while preserving unrelated configuration |
+| `/admin/api/preferred-ips` | POST | Import, normalize, deduplicate, and save preferred IPv4/IPv6 results |
+| `/admin/api/backup` | GET | Export UI settings and preferred IPs without administrator, UUID, token, or integration secrets |
+| `/admin/api/restore` | POST | Restore a validated console backup |
 | `/admin/config.json` | GET | Read the effective configuration, generated `LINK`, and subscription token |
 | `/admin/config.json` | POST | Save configuration JSON to KV |
 | `/admin/ADD.txt` | GET | Read the saved address list or a locally generated fallback list |
@@ -291,6 +302,10 @@ The administrator routes require a valid KV-backed session. A session expires af
 All configuration-changing POST requests require a same-origin `Origin` or `Referer` header. This is a CSRF protection, not an error.
 
 ### Edit configuration from the browser
+
+Use **Service settings** in `/admin` for the subscription name, tunnel path, transports, TLS fingerprint, refresh interval, Shadowsocks, 0-RTT, and certificate-verification behavior. The page also provides safe backup/restore and a UI-only default reset. The reset preserves unrelated operator configuration, preferred IPs, `ADMIN`, and `UUID`.
+
+The raw endpoint below remains available for advanced or backward-compatible administration.
 
 The stored JSON schema retains legacy internal property names for backward compatibility. To keep this guide language-neutral and avoid typing those names manually, the example below locates the subscription object through its stable ASCII properties.
 
@@ -504,9 +519,9 @@ Operational recommendations:
 
 This is the default camouflage page. Open `/login`, not `/`.
 
-### `/admin` only shows a few links
+### `/admin` redirects to the login page or does not load its assets
 
-That is the current built-in administrator page. Use `/admin/config.json` for the generated node and token, and follow the browser-console examples above for updates. A full graphical editor is not claimed in the current release.
+Sign in at `/login`, confirm that the `KV` binding is available, and make sure `/assets/edgetunnel-ui.css` and `/assets/edgetunnel-admin.js` are not blocked by a browser extension or an additional reverse proxy. The console itself has no external runtime asset dependency.
 
 ### `503 Administrator password is not configured`
 
@@ -524,9 +539,9 @@ Confirm that `wrangler.toml` contains a real namespace ID and that the binding i
 
 Read the current token from `/admin/config.json`. Confirm that the URL hostname is exactly the same hostname used to retrieve the token. Custom domains and `workers.dev` names have different tokens.
 
-### A Clash, Sing-box, or Surge request returns `501`
+### A legacy Clash, Sing-box, or Surge request returns `501`
 
-This is expected until the converter-settings object contains both `SUBAPI` and `SUBCONFIG` values pointing to HTTPS services controlled by the operator. Raw and Base64 URI subscriptions do not need a converter.
+This is expected until the converter-settings object contains both `SUBAPI` and `SUBCONFIG` values pointing to HTTPS services controlled by the operator. Raw, Base64, native `format=clash`, and native `format=links` subscriptions do not need a converter.
 
 ### Proxy testing returns `503`
 
@@ -568,7 +583,8 @@ src/
 ├── config.js                # Defaults, KV configuration, links, logs
 ├── controllers/
 │   ├── auth.js              # Login, sessions, origin checks, logout
-│   ├── admin.js             # Administrator API routes
+│   ├── admin.js             # Legacy and console administrator routing
+│   ├── admin-api.js         # Sanitized console API and mutations
 │   └── sub.js               # Subscription generation and conversion
 ├── core/
 │   ├── dialer.js            # Bounded connection racing and loser cleanup
@@ -577,7 +593,9 @@ src/
 ├── protocols/
 │   ├── parsers.js           # VLESS and Trojan parsing
 │   └── socks5.js            # Optional SOCKS5/HTTP upstream support
-└── utils/                    # Pages, address parsing, patches, helpers
+├── subscriptions/native.js  # Native Clash/share links and preferred-IP substitution
+├── ui/                       # Bundled pages, styles, scripts, and local QR rendering
+└── utils/                    # Address parsing, patches, proxy checks, helpers
 ```
 
 ## Acknowledgements

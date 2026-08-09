@@ -47,11 +47,12 @@ EdgeTunnel 是一个模块化 Cloudflare Worker。它接收 **VLESS/Trojan over 
 | 有界的直连/反代竞速拨号 | 支持；按请求生效，`1`-`4` 路 |
 | 本地 HTTP 204 连通性测速响应 | 支持；不会产生出站测速流量 |
 | Mihomo/Clash、Sing-box、Surge 转换 | 可选；需要管理员自建转换服务 |
-| 图形化管理后台 | 尚未实现；当前页面提供本地 JSON/文本入口 |
+| 内置图形化管理后台 | 支持；包含概览、节点、优选 IP、设置、日志、集成、备份与安全管理 |
+| 原生 Mihomo/Clash 与分享链接导出 | 支持；无需转换器，可按优选 IP 替换连接地址 |
 | Hysteria2、TUIC 等原生 QUIC/UDP 协议 | 当前 Worker 架构不支持 |
 
 > [!NOTE]
-> 当前 `/admin` 是一个完全内置的最小管理入口，不是图形化节点面板。本说明会详细介绍在不依赖第三方面板的情况下如何查看节点、获得订阅和修改配置。
+> `/admin` 现在是随 Worker 一起打包的完整管理应用，不会从第三方加载面板、脚本、字体、二维码服务或配置。管理 UI 与隧道数据路径相互独立，升级 UI 不会改变既有代理入口和旧订阅路由。
 
 ## 架构与信任边界
 
@@ -217,16 +218,15 @@ https://edgetunnel.<你的-workers-子域>.workers.dev/login
 登录后：
 
 1. 打开 `/admin`。
-2. 点击 **Configuration JSON**。
-3. 找到顶层字段 `LINK`。
-4. 完整复制 `vless://...` 或 `trojan://...`。
-5. 导入支持相应协议的客户端。
+2. 打开“节点与订阅”。
+3. 复制 VLESS、Trojan 或 Shadowsocks 链接、显示本地二维码，或者下载原生 Mihomo/Clash YAML。
+4. 导入支持相应协议的客户端。
 
-默认生成 VLESS。链接中已经包含 Worker 域名、TLS、WebSocket、路径和 UUID。
+控制台会根据已启用的传输生成 WebSocket、XHTTP 和 gRPC 节点。UUID 不会作为单独的明文字段展示，但复制的节点链接和受保护订阅中必然包含客户端连接所需凭据。
 
 ### 获取订阅链接
 
-在同一份配置 JSON 中找到：
+控制台会直接显示可复制的原生订阅 URL。需要兼容旧脚本时，也可以从登录后才能访问的 `/admin/config.json` 中找到：
 
 ```text
 优选订阅生成.TOKEN
@@ -246,13 +246,18 @@ https://你的域名/sub?token=你的TOKEN
 | --- | --- | --- |
 | 浏览器直接显示原始节点 | `/sub?token=TOKEN` | 不依赖外部服务 |
 | Base64 节点订阅 | `/sub?token=TOKEN&base64` | 不依赖外部服务 |
-| Mihomo/Clash YAML | `/sub?token=TOKEN&clash` | 必须配置自建 `SUBAPI` 和 `SUBCONFIG` |
+| 原生 Mihomo/Clash YAML | `/sub?token=TOKEN&format=clash` | 不依赖外部服务 |
+| 原生节点分享链接文本 | `/sub?token=TOKEN&format=links` | 不依赖外部服务 |
+| 使用优选 IP 的原生 Clash | `/sub?token=TOKEN&format=clash&ip=104.18.35.249` | 本地实测可用的 Cloudflare IPv4 或 IPv6 |
+| 旧版转换式 Mihomo/Clash YAML | `/sub?token=TOKEN&clash` | 必须配置自建 `SUBAPI` 和 `SUBCONFIG` |
 | Sing-box JSON | `/sub?token=TOKEN&singbox` | 必须配置自建 `SUBAPI` 和 `SUBCONFIG` |
 | Surge 配置 | `/sub?token=TOKEN&surge` | 必须配置自建 `SUBAPI` 和 `SUBCONFIG` |
 | Quantumult X | `/sub?token=TOKEN&quanx` | 必须配置自建 `SUBAPI` 和 `SUBCONFIG` |
 | Loon | `/sub?token=TOKEN&loon` | 必须配置自建 `SUBAPI` 和 `SUBCONFIG` |
 
-Mihomo、Sing-box、Surge 等是客户端配置格式，不是 Worker 新增的入站网络协议。没有配置自建转换器时，转换请求会明确返回 HTTP 501，不会偷偷调用公共转换站。
+原生输出还支持可选参数 `port`、`name` 和 `download=1`。加入 `ip` 后只会替换节点的连接 `server`，加入 `port` 时再替换端口；TLS `servername`/SNI、HTTP `Host`、隧道路径、UUID/密码仍然保持 Worker 服务值。因此客户端会连接优选 IP，但 Cloudflare 仍能把流量路由到正确的 Worker。控制台会严格校验 IPv4/IPv6，并可在当前部署的 KV 中保存最多 128 条本地扫描结果。
+
+网页运行在 Cloudflare 侧，不能代替你从本地运营商网络做真实线路扫描。请在实际使用设备上扫描延迟，把结果导入“优选 IP”，再在实际客户端中测试。Mihomo、Sing-box、Surge 等是客户端配置格式，不是 Worker 新增的入站网络协议。旧版转换请求未配置自建转换器时会返回 HTTP 501；原生 `format=clash` 和 `format=links` 完全不需要转换器。
 
 ## 可选：独立的 Clash 订阅 Worker
 
@@ -265,14 +270,20 @@ Tunnel 域名及 Cloudflare Secrets。
 Account ID、KV ID、自定义域名、UUID、密码和订阅 Token 只能放在被 Git 忽略的
 本地配置或 Cloudflare Secrets 中，不要把任何账户专用 Wrangler 文件提交到仓库。
 
-## 当前管理页的使用方法
+## 图形化管理后台
 
 管理接口需要有效的 KV 会话。登录会话有效期为 24 小时，执行注销后立即撤销。
 
 | 路径 | 方法 | 用途 |
 | --- | --- | --- |
 | `/login` | GET、POST | 显示本地登录页并创建会话 |
-| `/admin` | GET | 最小化本地管理入口 |
+| `/admin` | GET | 自适应桌面与手机的内置管理后台 |
+| `/admin/api/bootstrap` | GET | 读取脱敏后的 UI 状态、原生订阅、优选 IP 和近期日志 |
+| `/admin/api/preview` | GET | 使用服务域名或经过校验的优选 IP 预览节点与订阅 |
+| `/admin/api/settings` | POST | 只保存 UI 管理的订阅设置，保留其他运维配置 |
+| `/admin/api/preferred-ips` | POST | 导入、校验、去重并保存优选 IPv4/IPv6 |
+| `/admin/api/backup` | GET | 导出 UI 设置和优选 IP，不包含管理员密码、UUID、订阅 token 或集成密钥 |
+| `/admin/api/restore` | POST | 恢复经过结构校验的控制台备份 |
 | `/admin/config.json` | GET | 查看有效配置、节点 `LINK` 和订阅 TOKEN |
 | `/admin/config.json` | POST | 将完整配置 JSON 保存到 KV |
 | `/admin/ADD.txt` | GET | 查看已保存地址或本地生成的备用地址 |
@@ -285,6 +296,10 @@ Account ID、KV ID、自定义域名、UUID、密码和订阅 Token 只能放在
 所有修改配置的 POST 都必须携带同源 `Origin` 或 `Referer`，这是 CSRF 防护。
 
 ### 在浏览器中修改配置
+
+日常设置直接使用 `/admin` 的“服务设置”页面：可以管理订阅名称、隧道路径、传输协议、TLS 指纹、刷新间隔、Shadowsocks、0-RTT 和证书校验策略。页面还提供不含密钥的备份/恢复，以及只重置 UI 管理字段的“恢复默认配置”；它不会删除优选 IP、`ADMIN`、`UUID` 或其他运维配置。
+
+下面的原始 JSON 接口继续保留，供高级操作和旧脚本兼容使用。
 
 登录后打开 `/admin`，再打开浏览器开发者控制台，执行：
 
@@ -486,9 +501,9 @@ TURN 明确限定为 RFC 6062 TCP Allocate/Connect。SSTP 明确限定为 TLS、
 
 这是默认伪装页。请访问 `/login`。
 
-### `/admin` 只有几个链接
+### `/admin` 跳回登录页或样式没有加载
 
-这是当前内置管理页的实际功能。节点和 token 位于 `/admin/config.json`，修改方法见上面的浏览器控制台示例。当前版本没有宣称包含完整图形化后台。
+先从 `/login` 登录，确认 `KV` 绑定可用，再检查浏览器扩展或额外反向代理是否拦截了 `/assets/edgetunnel-ui.css` 与 `/assets/edgetunnel-admin.js`。控制台本身不依赖任何外部运行时静态资源。
 
 ### 返回 `503 Administrator password is not configured`
 
@@ -506,9 +521,9 @@ npx wrangler secret put ADMIN
 
 从当前域名的 `/admin/config.json` 重新复制 token。自定义域名和 `workers.dev` 域名使用不同 token。
 
-### Clash、Sing-box 或 Surge 返回 `501`
+### 旧版 Clash、Sing-box 或 Surge 转换返回 `501`
 
-只有 `订阅转换配置.SUBAPI` 和 `SUBCONFIG` 都指向管理员控制的 HTTPS 服务后才会开启。原始/Base64 订阅不需要转换器。
+只有 `订阅转换配置.SUBAPI` 和 `SUBCONFIG` 都指向管理员控制的 HTTPS 服务后才会开启。原始、Base64、原生 `format=clash` 与 `format=links` 订阅都不需要转换器。
 
 ### 代理测试返回 `503`
 
@@ -548,13 +563,16 @@ src/
 ├── config.js                # 默认配置、KV、节点、日志
 ├── controllers/
 │   ├── auth.js              # 登录、会话、同源校验、注销
-│   ├── admin.js             # 管理接口
+│   ├── admin.js             # 旧接口与控制台管理路由
+│   ├── admin-api.js         # 脱敏控制台 API 与写操作
 │   └── sub.js               # 订阅生成和转换
 ├── core/proxy.js            # WebSocket 与出站 Socket 生命周期
 ├── protocols/
 │   ├── parsers.js           # VLESS、Trojan 解析
 │   └── socks5.js            # 可选 SOCKS5/HTTP 上游
-└── utils/                    # 页面、地址解析、格式补丁、工具
+├── subscriptions/native.js  # 原生 Clash/分享链接与优选 IP 替换
+├── ui/                       # 内置页面、样式、脚本和本地二维码
+└── utils/                    # 地址解析、格式补丁、代理诊断、工具
 ```
 
 ## 致谢

@@ -1,55 +1,24 @@
 
-import { readConfig, logRequest } from "../config.js";
+import { readConfig } from "../config.js";
 import { getCloudflareUsage, requestOptimalAPI, generateRandomIP } from "../utils/ip.js";
-import { getSocks5Account, isSafeConnectTarget } from "../utils/helpers.js";
-import { socks5Connect, httpConnect } from "../protocols/socks5.js";
 import { isTrustedRequestOrigin } from "./auth.js";
-import { adminPage } from '../utils/pages.js';
+import { adminPage } from '../ui/pages.js';
+import { apiSecurityHeaders, htmlSecurityHeaders } from '../ui/assets.js';
+import { handleAdminApi } from './admin-api.js';
+import { checkProxyConnection, getProxyCheckTarget } from '../utils/proxy-check.js';
 
 function forbiddenResponse() {
-    return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
+    return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: apiSecurityHeaders() });
 }
 
 function requiresTrustedMutation(request) {
     return request.method === 'POST' && isTrustedRequestOrigin(request);
 }
 
-function getProxyCheckTarget(env) {
-    const hostname = env.PROXY_CHECK_HOST?.trim();
-    const port = Number(env.PROXY_CHECK_PORT || 80);
-    const path = env.PROXY_CHECK_PATH || '/';
-    if (!isSafeConnectTarget(hostname, port) || !path.startsWith('/') || /[\r\n]/.test(path)) return null;
-    return { hostname, port, path };
-}
-
-async function checkSocksProxy(protocol, param, target) {
-    const startTime = Date.now();
-    let parsed;
-    try { parsed = await getSocks5Account(param); } catch (err) { return { success: false, error: err.message, proxy: protocol + "://" + param, responseTime: Date.now() - startTime }; }
-
-    try {
-        const initialData = new Uint8Array(0);
-        const tcpSocket = protocol == 'socks5' ? await socks5Connect(target.hostname, target.port, initialData, parsed) : await httpConnect(target.hostname, target.port, initialData, parsed);
-        if (!tcpSocket) return { success: false, error: '无法连接到代理服务器', proxy: protocol + "://" + param, responseTime: Date.now() - startTime };
-        try {
-            const writer = tcpSocket.writable.getWriter(), encoder = new TextEncoder();
-            await writer.write(encoder.encode(`GET ${target.path} HTTP/1.1\r\nHost: ${target.hostname}\r\nConnection: close\r\n\r\n`));
-            writer.releaseLock();
-            const reader = tcpSocket.readable.getReader(), decoder = new TextDecoder();
-            let response = '';
-            try { while (true) { const { done, value } = await reader.read(); if (done) break; response += decoder.decode(value, { stream: true }); } } finally { reader.releaseLock(); }
-            await tcpSocket.close();
-            return { success: true, proxy: protocol + "://" + param, ip: response.match(/ip=(.*)/)?.[1], loc: response.match(/loc=(.*)/)?.[1], responseTime: Date.now() - startTime };
-        } catch (error) {
-            try { await tcpSocket.close(); } catch (e) { }
-            return { success: false, error: error.message, proxy: protocol + "://" + param, responseTime: Date.now() - startTime };
-        }
-    } catch (error) { return { success: false, error: error.message, proxy: protocol + "://" + param, responseTime: Date.now() - startTime }; }
-}
-
 export async function handleAdmin(request, env, config, path) {
     const url = new URL(request.url);
-    const accessIP = request.headers.get('CF-Connecting-IP') || 'Unknown';
+
+    if (path.startsWith('admin/api/')) return handleAdminApi(request, env, config, path, { checkProxyConnection, getProxyCheckTarget });
 
     if (path === 'admin/log.json') {
         const logs = await env.KV.get('log.json') || '[]';
@@ -82,10 +51,10 @@ export async function handleAdmin(request, env, config, path) {
         const target = getProxyCheckTarget(env);
         if (!target) return new Response(JSON.stringify({ error: 'Configure an operator-owned PROXY_CHECK_HOST before testing an upstream proxy' }), { status: 503, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
         if (url.searchParams.has('socks5')) {
-            const res = await checkSocksProxy('socks5', url.searchParams.get('socks5'), target);
+            const res = await checkProxyConnection('socks5', url.searchParams.get('socks5'), target);
             return new Response(JSON.stringify(res, null, 2), { status: 200 });
         } else if (url.searchParams.has('http')) {
-            const res = await checkSocksProxy('http', url.searchParams.get('http'), target);
+            const res = await checkProxyConnection('http', url.searchParams.get('http'), target);
             return new Response(JSON.stringify(res, null, 2), { status: 200 });
         }
         return new Response(JSON.stringify({ error: 'Missing defined parameters' }), { status: 400 });
@@ -163,5 +132,5 @@ export async function handleAdmin(request, env, config, path) {
         return new Response(JSON.stringify(request.cf, null, 2), { status: 200 });
     }
 
-    return new Response(adminPage(), { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+    return new Response(adminPage(), { status: 200, headers: htmlSecurityHeaders() });
 }

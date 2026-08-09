@@ -3,6 +3,13 @@ import { MD5MD5, batchReplaceDomain, buildProxyUri, buildShadowsocksUri, normali
 import { generateRandomIP, parseLocalAddressList } from "../utils/ip.js";
 import { SingboxPatch, ClashPatch, SurgePatch } from "../utils/patches.js";
 import { logRequest } from "../config.js";
+import {
+    createNativeNodes,
+    generateNativeClash,
+    generateNativeLinks,
+    preferredTargetFromUrl,
+    safeDownloadName,
+} from '../subscriptions/native.js';
 
 async function getECH(host, dohUrl) {
     if (!dohUrl) return '';
@@ -47,6 +54,26 @@ export async function handleSub(request, env, config, ctx) {
         "Subscription-Userinfo": `upload=0; download=0; total=107374182400; expire=${expire}`,
         "Cache-Control": "no-store",
     };
+
+    const nativeFormat = (url.searchParams.get('format') || '').toLowerCase();
+    if (nativeFormat === 'clash' || nativeFormat === 'links') {
+        try {
+            const preferredTarget = preferredTargetFromUrl(url);
+            const nodes = createNativeNodes(config, env, preferredTarget);
+            const isClash = nativeFormat === 'clash';
+            const content = isClash ? generateNativeClash(nodes) : generateNativeLinks(nodes);
+            const extension = isClash ? 'yaml' : 'txt';
+            responseHeaders['content-type'] = isClash ? 'application/x-yaml; charset=utf-8' : 'text/plain; charset=utf-8';
+            responseHeaders['X-Content-Type-Options'] = 'nosniff';
+            responseHeaders['X-Robots-Tag'] = 'noindex, nofollow, noarchive';
+            if (url.searchParams.get('download') === '1') {
+                responseHeaders['Content-Disposition'] = `attachment; filename="${safeDownloadName(config, preferredTarget, extension)}"`;
+            }
+            return new Response(request.method === 'HEAD' ? null : content, { status: 200, headers: responseHeaders });
+        } catch (error) {
+            return new Response(error.message, { status: 400, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });
+        }
+    }
 
     const isSubConverter = url.searchParams.has('b64') || url.searchParams.has('base64') || ua.includes('subconverter');
     const type = isSubConverter ? 'mixed' :

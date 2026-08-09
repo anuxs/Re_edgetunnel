@@ -46,11 +46,12 @@ Durante la ejecución no descarga código ni un panel desde otros repositorios G
 | Carrera limitada de conexiones directas/proxy | Compatible; por solicitud, `1`-`4` conexiones |
 | Respuesta local HTTP 204 para pruebas de conectividad | Compatible; sin tráfico saliente de prueba |
 | Conversión para Mihomo/Clash, Sing-box y Surge | Opcional; necesita un conversor del operador |
-| Consola gráfica de administración | Aún no implementada; la página actual ofrece JSON y texto locales |
+| Consola gráfica de administración integrada | Compatible; resumen, nodos, IP preferidas, ajustes, registros, integraciones, copias y seguridad |
+| Exportación nativa Mihomo/Clash y enlaces | Compatible; sin conversor y con sustitución opcional de IP preferida |
 | Hysteria2, TUIC y otros protocolos QUIC/UDP nativos | No compatibles con esta arquitectura |
 
 > [!NOTE]
-> La ruta `/admin` es actualmente una página mínima e independiente. No contiene un editor gráfico de nodos. Esta guía explica cómo leer y cambiar la configuración sin depender de un panel externo.
+> `/admin` es una aplicación de administración integrada en el Worker. No carga paneles, scripts, fuentes, servicios QR ni configuraciones desde terceros. La ruta de datos del túnel y las rutas de suscripción existentes son independientes de la interfaz.
 
 ## Arquitectura y límite de confianza
 
@@ -195,19 +196,18 @@ Inicia sesión con `ADMIN` y visita `/admin`.
 
 ## Primer uso: nodo y suscripción
 
-### Copiar un nodo individual
+### Obtener nodos y suscripciones desde la consola
 
 1. Inicia sesión y abre `/admin`.
-2. Selecciona el enlace de configuración JSON.
-3. Busca el campo superior `LINK`.
-4. Copia el URI completo `vless://...` o `trojan://...`.
-5. Impórtalo en un cliente compatible.
+2. Abre la sección de nodos y suscripciones.
+3. Copia un URI VLESS, Trojan o Shadowsocks, muestra el código QR local o descarga el YAML nativo para Mihomo/Clash.
+4. Impórtalo en un cliente compatible.
 
-El protocolo predeterminado es VLESS. El enlace ya contiene host, TLS, WebSocket, ruta y UUID.
+La consola genera entradas WebSocket, XHTTP y gRPC según los transportes habilitados. Las credenciales no aparecen como un campo independiente, pero necesariamente forman parte de los URI copiados y de las suscripciones protegidas.
 
 ### Crear la URL de suscripción
 
-En el mismo JSON, busca la propiedad única `TOKEN` dentro del objeto de ajustes de suscripción. Construye la URL con ese valor:
+La consola muestra URL nativas listas para copiar. Para automatización antigua, la propiedad única `TOKEN` continúa disponible en `/admin/config.json` después de iniciar sesión:
 
 ```text
 https://HOST_DEL_WORKER/sub?token=TOKEN
@@ -221,22 +221,33 @@ Esta URL es una credencial. No la publiques, no la incluyas en capturas y no la 
 | --- | --- | --- |
 | Lista URI sin codificar en el navegador | `/sub?token=TOKEN` | Sin servicio externo |
 | Suscripción URI en Base64 | `/sub?token=TOKEN&base64` | Sin servicio externo |
-| YAML de Mihomo/Clash | `/sub?token=TOKEN&clash` | `SUBAPI` y `SUBCONFIG` propios |
+| YAML nativo de Mihomo/Clash | `/sub?token=TOKEN&format=clash` | Sin servicio externo |
+| Texto nativo con enlaces | `/sub?token=TOKEN&format=links` | Sin servicio externo |
+| Clash nativo con IP preferida | `/sub?token=TOKEN&format=clash&ip=104.18.35.249` | IPv4 o IPv6 de Cloudflare probado localmente |
+| YAML de Mihomo/Clash convertido, heredado | `/sub?token=TOKEN&clash` | `SUBAPI` y `SUBCONFIG` propios |
 | JSON de Sing-box | `/sub?token=TOKEN&singbox` | `SUBAPI` y `SUBCONFIG` propios |
 | Configuración Surge | `/sub?token=TOKEN&surge` | `SUBAPI` y `SUBCONFIG` propios |
 | Quantumult X | `/sub?token=TOKEN&quanx` | `SUBAPI` y `SUBCONFIG` propios |
 | Loon | `/sub?token=TOKEN&loon` | `SUBAPI` y `SUBCONFIG` propios |
 
-Mihomo, Sing-box y Surge son formatos de configuración de cliente, no nuevos protocolos de entrada. Sin un conversor configurado, el Worker responde HTTP 501 y no usa silenciosamente un conversor público.
+Los parámetros nativos opcionales son `ip`, `port`, `name` y `download=1`. Una IP preferida cambia únicamente el `server` de conexión y, si se indica, el puerto. El `servername`/SNI de TLS, el `Host` HTTP, la ruta del túnel y las credenciales siguen identificando al Worker. La consola valida IPv4/IPv6 y guarda hasta 128 resultados de escaneo local en el KV del despliegue.
 
-## Administración actual
+El Worker no puede medir desde la red local del usuario. Ejecuta el escáner de latencia en la red cliente, importa los resultados y prueba el nodo generado en el cliente real. Las solicitudes de conversión heredadas responden HTTP 501 si no existe un conversor del operador; `format=clash` y `format=links` no necesitan ninguno.
+
+## Consola de administración
 
 Las rutas administrativas necesitan una sesión válida almacenada en KV. La sesión caduca a las 24 horas y el cierre de sesión la revoca inmediatamente.
 
 | Ruta | Método | Función |
 | --- | --- | --- |
 | `/login` | GET, POST | Formulario local y creación de sesión |
-| `/admin` | GET | Índice administrativo mínimo |
+| `/admin` | GET | Consola integrada adaptable a escritorio y móvil |
+| `/admin/api/bootstrap` | GET | Estado saneado, exportaciones nativas, IP preferidas y registros recientes |
+| `/admin/api/preview` | GET | Vista previa con el hostname del servicio o una IP preferida validada |
+| `/admin/api/settings` | POST | Guardar ajustes administrados por la interfaz sin borrar otros valores |
+| `/admin/api/preferred-ips` | POST | Importar, validar, deduplicar y guardar IPv4/IPv6 preferidas |
+| `/admin/api/backup` | GET | Exportar ajustes e IP sin contraseñas, UUID, token ni secretos de integraciones |
+| `/admin/api/restore` | POST | Restaurar una copia validada de la consola |
 | `/admin/config.json` | GET | Configuración efectiva, `LINK` y token |
 | `/admin/config.json` | POST | Guardar configuración completa en KV |
 | `/admin/ADD.txt` | GET | Leer direcciones guardadas o generadas localmente |
@@ -249,6 +260,10 @@ Las rutas administrativas necesitan una sesión válida almacenada en KV. La ses
 Los POST que cambian datos exigen un encabezado `Origin` o `Referer` del mismo origen. Es una protección CSRF.
 
 ### Cambiar la configuración desde el navegador
+
+Para el uso normal, emplea la sección de ajustes de `/admin`. Permite cambiar el nombre, la ruta, los transportes, la huella TLS, el intervalo, Shadowsocks, 0-RTT y la validación del certificado. La copia/restauración excluye secretos y el restablecimiento de la interfaz conserva la configuración no administrada, las IP preferidas, `ADMIN` y `UUID`.
+
+El endpoint JSON siguiente sigue disponible para administración avanzada y compatibilidad.
 
 El esquema JSON guardado conserva nombres internos heredados por compatibilidad. Para mantener esta guía completamente en español y evitar escribir esos nombres manualmente, el ejemplo localiza el objeto de suscripción mediante propiedades ASCII estables.
 
@@ -452,9 +467,9 @@ Recomendaciones:
 
 Es el camuflaje predeterminado. Abre `/login`.
 
-### `/admin` solo muestra unos enlaces
+### `/admin` vuelve al inicio de sesión o no carga estilos
 
-Ese es el panel incorporado actual. El nodo y token están en `/admin/config.json`; usa los ejemplos anteriores para modificar datos. La versión actual no afirma incluir un editor gráfico completo.
+Inicia sesión desde `/login`, confirma el binding `KV` y comprueba que una extensión o un proxy adicional no bloquee `/assets/edgetunnel-ui.css` ni `/assets/edgetunnel-admin.js`. La consola no depende de recursos externos en tiempo de ejecución.
 
 ### `503 Administrator password is not configured`
 
@@ -470,9 +485,9 @@ Comprueba que `wrangler.toml` contenga un ID real y que el binding se llame exac
 
 Copia de nuevo el token desde el mismo hostname. Un dominio personalizado y el hostname `workers.dev` generan tokens diferentes.
 
-### Clash, Sing-box o Surge responde `501`
+### Una conversión heredada de Clash, Sing-box o Surge responde `501`
 
-Configura las propiedades `SUBAPI` y `SUBCONFIG` del objeto del conversor con servicios HTTPS propios. Las salidas URI y Base64 no necesitan conversor.
+Configura las propiedades `SUBAPI` y `SUBCONFIG` del objeto del conversor con servicios HTTPS propios. Las salidas URI, Base64, `format=clash` y `format=links` no necesitan conversor.
 
 ### La prueba de proxy responde `503`
 
@@ -508,10 +523,12 @@ Estas pruebas requieren un Worker, KV y credenciales temporales. No ejecutes pru
 src/
 ├── index.js                 # Entrada y rutas
 ├── config.js                # Configuración, KV, enlaces y registros
-├── controllers/             # Autenticación, administración, suscripciones
+├── controllers/             # Autenticación, API de consola y suscripciones
 ├── core/proxy.js            # Ciclo WebSocket y Socket saliente
 ├── protocols/               # VLESS, Trojan, SOCKS5 y HTTP ascendente
-└── utils/                   # Páginas, direcciones, parches y utilidades
+├── subscriptions/native.js  # Clash/enlaces nativos y sustitución de IP
+├── ui/                      # Páginas, estilos, scripts y QR integrados
+└── utils/                   # Direcciones, parches, diagnóstico y utilidades
 ```
 
 ## Agradecimientos
