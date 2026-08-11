@@ -107,8 +107,10 @@ the local TOML file and store the JSON array as a secret instead:
 npx wrangler secret put NODES_JSON --config workers/clash-sub/wrangler.local.toml
 ```
 
-Managed Cloudflare node names are replaced by freshly generated entries, and
-duplicate names are rejected.
+Only the seven explicitly managed `cloudflare-*` node names are replaced by
+freshly generated entries. Every other item in `NODES_JSON` is retained as-is,
+regardless of provider name, server hostname, or protocol; duplicate names are
+still rejected.
 
 ## Using a scanned Cloudflare edge IP
 

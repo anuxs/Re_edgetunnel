@@ -24,3 +24,11 @@ test('runtime source has no third-party repository or implicit public resolver d
 test('legacy single-file backup is not present', () => {
     assert.equal(existsSync(join(repositoryRoot, '_worker.js.bak')), false);
 });
+
+test('long-lived TCP streams refresh the idle timer in both directions', () => {
+    const source = readFileSync(join(repositoryRoot, 'src', 'core', 'proxy.js'), 'utf8');
+    assert.match(source, /const IDLE_TIMEOUT_MS = 15 \* 60_000;/);
+    assert.match(source, /async function connectStreams\([^)]*onActivity = null\)/);
+    assert.match(source, /hasData = true;\s*onActivity\?\.\(\);/);
+    assert.equal((source.match(/proxyConfig,\s*resetIdleTimer/g) || []).length, 2);
+});

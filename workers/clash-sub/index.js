@@ -135,14 +135,6 @@ export function cloudflareNodes(uuidInput, hostInput) {
     ];
 }
 
-function nodeText(node) {
-    return [node?.name, node?.server, node?.shareLink].filter(Boolean).join(' ').toLowerCase();
-}
-
-function isUpCloudNode(node) {
-    return nodeText(node).includes('upcloud');
-}
-
 function validateNode(node) {
     if (!node || !node.name || !node.type || !node.server || !node.port) {
         throw new Error('Every node needs name, type, server and port');
@@ -162,8 +154,9 @@ export function loadConfig(env) {
     }
     if (!Array.isArray(originalNodes)) throw new Error('NODES_JSON must be an array');
 
-    const retainedNodes = originalNodes.filter((node) =>
-        !isUpCloudNode(node) && !CLOUDFLARE_NODE_NAMES.has(node?.name));
+    // Only the explicitly managed Cloudflare entries are replaced. Every
+    // operator-provided node outside that name set must survive unchanged.
+    const retainedNodes = originalNodes.filter((node) => !CLOUDFLARE_NODE_NAMES.has(node?.name));
     const nodes = [...retainedNodes, ...cloudflareNodes(env.CLOUDFLARE_UUID, env.CLOUDFLARE_HOST)];
     const names = new Set();
     for (const node of nodes) {

@@ -28,6 +28,11 @@ head_sampling_rate = 0.1
 # Keep URLs containing credentials in a Wrangler secret instead of this file.
 # UPSTREAM_PROXY = "https://user:password@proxy.your-domain.com:443"
 
+# [Upstream routing policy]
+# "always" keeps the historical behavior and sends every TCP target upstream.
+# "cloudflare" sends only destinations in Cloudflare's published IP ranges upstream.
+# UPSTREAM_PROXY_MODE = "cloudflare"
+
 # [Bounded connection racing: each value is clamped to 1-4]
 # TCP_CONCURRENT_DIAL = "1"
 # PROXY_CONCURRENT_DIAL = "1"

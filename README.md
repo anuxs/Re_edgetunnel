@@ -356,6 +356,7 @@ Keep secrets in Cloudflare Secrets. Put non-sensitive values in the ignored `wra
 | `URL` | Variable; optional | Root camouflage: `nginx`, `1101`, or an explicit HTTPS origin |
 | `PROXYIP` | Variable or Secret | Operator-selected fallback proxy IP |
 | `UPSTREAM_PROXY` | Secret when credentialed | `socks5://`, `http://`, `https://`, `turn://`, `turns://`, or `sstp://` upstream |
+| `UPSTREAM_PROXY_MODE` | Variable | `always` (default) or selective `cloudflare` routing |
 | `TCP_CONCURRENT_DIAL` | Variable | Direct connection race width, clamped to `1`-`4` |
 | `PROXY_CONCURRENT_DIAL` | Variable | Proxy candidate race width, clamped to `1`-`4` |
 | `SPEEDTEST_MODE` | Variable | `local` returns bounded local HTTP 204 responses; `block` closes the test tunnel |
@@ -367,6 +368,25 @@ Keep secrets in Cloudflare Secrets. Put non-sensitive values in the ignored `wra
 | `ALLOW_REMOTE_USAGE_API` | Variable | Must be `true` before a stored remote Cloudflare usage API is called |
 
 Legacy aliases such as `PASSWORD` or `TOKEN` are accepted for compatibility, but new deployments should use `ADMIN`. Do not place any credential, Cloudflare account ID, KV namespace ID, private domain, or generated subscription URL in a tracked file.
+
+### Selective Cloudflare upstream routing
+
+Cloudflare Workers block raw outbound TCP sockets to Cloudflare-owned IP ranges. `UPSTREAM_PROXY_MODE=cloudflare` handles that platform boundary without sending unrelated traffic through the upstream:
+
+1. An IP-literal destination is checked locally against Cloudflare's published IPv4 and IPv6 ranges.
+2. A hostname destination is resolved through Cloudflare's JSON DNS-over-HTTPS endpoint. A and AAAA results are cached in the Worker isolate for 30 seconds to one hour according to bounded DNS TTLs.
+3. If any resolved address belongs to Cloudflare, the Worker uses `UPSTREAM_PROXY`. Other destinations keep the direct socket path.
+4. If both DNS lookups fail, routing fails open to the direct path instead of silently sending all traffic upstream.
+
+`always` remains the default for backward compatibility. It preserves the historical behavior in which every TCP destination uses `UPSTREAM_PROXY`. `PROXYIP` remains a separate fallback and does not override the selective decision. Keep a credentialed upstream URL in a Wrangler Secret:
+
+```bash
+npx wrangler secret put UPSTREAM_PROXY --config wrangler.local.toml
+```
+
+The upstream proxy endpoint itself must resolve to an address outside Cloudflare-owned ranges. Put its hostname on a DNS-only record, or use a direct non-Cloudflare address; proxying that first hop through Cloudflare recreates the same blocked socket path. The bundled range snapshot is sourced from Cloudflare's [IPv4](https://www.cloudflare.com/ips-v4/) and [IPv6](https://www.cloudflare.com/ips-v6/) lists. Review those sources when updating the snapshot. The DNS lookup is performed only when the operator explicitly selects `cloudflare` mode.
+
+For long-lived TCP streams, traffic in either direction refreshes a 15-minute idle timer. A separate one-hour session ceiling remains in place.
 
 ## Optional subscription conversion
 

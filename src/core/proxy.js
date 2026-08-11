@@ -5,6 +5,7 @@ import { base64ToArray, getSocks5Account, isSafeConnectTarget } from "../utils/h
 import { parseProxyAddress } from "../utils/ip.js";
 import { parseConcurrentDialCount, raceSocketCandidates } from "./dialer.js";
 import { isSpeedTestSite, LocalSpeedTestSession } from "./speedtest.js";
+import { shouldUseUpstreamProxy } from "./upstream-routing.js";
 import {
     ShadowsocksAeadDecoder,
     ShadowsocksAeadEncoder,
@@ -20,7 +21,7 @@ import {
 import { tryParseTunnelHandshake } from "../protocols/handshake.js";
 
 const CONNECT_TIMEOUT_MS = 10_000;
-const IDLE_TIMEOUT_MS = 5 * 60_000;
+const IDLE_TIMEOUT_MS = 15 * 60_000;
 const MAX_SESSION_MS = 60 * 60_000;
 const MAX_INITIAL_REQUEST_BYTES = 8192;
 
@@ -74,12 +75,13 @@ function makeReadableStr(socket, earlyDataHeader) {
     });
 }
 
-export async function connectStreams(remoteSocket, webSocket, headerData, retryFunc) {
+export async function connectStreams(remoteSocket, webSocket, headerData, retryFunc, onActivity = null) {
     let header = headerData, hasData = false;
     await remoteSocket.readable.pipeTo(
         new WritableStream({
             async write(chunk, controller) {
                 hasData = true;
+                onActivity?.();
                 if (webSocket.readyState !== WebSocket.OPEN) controller.error('ws.readyState is not open');
                 if (header) {
                     const response = new Uint8Array(header.length + chunk.byteLength);
@@ -171,7 +173,7 @@ export async function forwardDataUDP(udpChunk, webSocket, respHeader, dnsResolve
     }
 }
 
-export async function forwardDataTCP(host, portNum, rawData, ws, respHeader, remoteConnWrapper, yourUUID, proxyConfig) {
+export async function forwardDataTCP(host, portNum, rawData, ws, respHeader, remoteConnWrapper, yourUUID, proxyConfig, onActivity = null) {
     // proxyConfig contains: proxyIP, enableProxyFallback, socks5 (type, account, global), whiteList
     // This is passed from the main worker to avoid global state issues.
 
@@ -187,6 +189,7 @@ export async function forwardDataTCP(host, portNum, rawData, ws, respHeader, rem
         tcpConcurrentDial,
         proxyConcurrentDial,
         upstreamProxy,
+        upstreamProxyMode,
     } = proxyConfig;
 
     // Note: parsedSocks5Address should be parsed once at request level if possible, 
@@ -245,11 +248,11 @@ export async function forwardDataTCP(host, portNum, rawData, ws, respHeader, rem
         }
     }
 
-    async function connectToProxy() {
+    async function connectToProxy(useConfiguredUpstream = false) {
         let newSocket;
-        if (upstreamProxy?.type === 'socks5') {
+        if (useConfiguredUpstream && upstreamProxy?.type === 'socks5') {
             newSocket = await socks5Connect(host, portNum, rawData, upstreamProxy);
-        } else if (upstreamProxy?.type === 'http' || upstreamProxy?.type === 'https') {
+        } else if (useConfiguredUpstream && (upstreamProxy?.type === 'http' || upstreamProxy?.type === 'https')) {
             newSocket = await httpConnect(
                 host,
                 portNum,
@@ -257,12 +260,12 @@ export async function forwardDataTCP(host, portNum, rawData, ws, respHeader, rem
                 upstreamProxy,
                 { tls: upstreamProxy.type === 'https' }
             );
-        } else if (upstreamProxy?.type === 'turn' || upstreamProxy?.type === 'turns') {
+        } else if (useConfiguredUpstream && (upstreamProxy?.type === 'turn' || upstreamProxy?.type === 'turns')) {
             newSocket = await turnConnect(upstreamProxy, host, portNum, proxyConfig.dnsResolver);
             const writer = newSocket.writable.getWriter();
             try { await writer.write(rawData); }
             finally { writer.releaseLock(); }
-        } else if (upstreamProxy?.type === 'sstp') {
+        } else if (useConfiguredUpstream && upstreamProxy?.type === 'sstp') {
             newSocket = await sstpConnect(upstreamProxy, host, portNum, proxyConfig.dnsResolver);
             const writer = newSocket.writable.getWriter();
             try { await writer.write(rawData); }
@@ -280,19 +283,20 @@ export async function forwardDataTCP(host, portNum, rawData, ws, respHeader, rem
         }
         remoteConnWrapper.socket = newSocket;
         newSocket.closed.catch(() => { }).finally(() => closeSocketQuietly(ws));
-        void connectStreams(newSocket, ws, respHeader, null).catch(() => closeSocketQuietly(ws));
+        void connectStreams(newSocket, ws, respHeader, null, onActivity).catch(() => closeSocketQuietly(ws));
     }
 
     const checkSocks5Whitelist = (addr) => socks5Whitelist.some(p => new RegExp(`^${p.replace(/\*/g, '.*')}$`, 'i').test(addr));
 
-    if (upstreamProxy || (socks5Type && (socks5Global || checkSocks5Whitelist(host)))) {
-        await connectToProxy();
+    const useConfiguredUpstream = await shouldUseUpstreamProxy(host, upstreamProxy, upstreamProxyMode);
+    if (useConfiguredUpstream || (socks5Type && (socks5Global || checkSocks5Whitelist(host)))) {
+        await connectToProxy(useConfiguredUpstream);
     } else {
         try {
             const initialSocket = await connectDirect(host, portNum, rawData);
             remoteConnWrapper.socket = initialSocket;
             initialSocket.closed.catch(() => { }).finally(() => closeSocketQuietly(ws));
-            void connectStreams(initialSocket, ws, respHeader, proxyIP ? connectToProxy : null).catch(() => closeSocketQuietly(ws));
+            void connectStreams(initialSocket, ws, respHeader, proxyIP ? () => connectToProxy(false) : null, onActivity).catch(() => closeSocketQuietly(ws));
         } catch (err) {
             if (!proxyIP) {
                 console.warn(`TCP connection failed: ${err.message}`);
@@ -300,7 +304,7 @@ export async function forwardDataTCP(host, portNum, rawData, ws, respHeader, rem
                 return;
             }
             try {
-                await connectToProxy();
+                await connectToProxy(false);
             } catch (proxyError) {
                 console.warn(`TCP proxy fallback failed: ${proxyError.message}`);
                 closeSocketQuietly(ws);
@@ -418,7 +422,8 @@ export async function handleWSRequest(request, yourUUID, proxyConfig) {
                         null,
                         remoteConnWrapper,
                         yourUUID,
-                        proxyConfig
+                        proxyConfig,
+                        resetIdleTimer
                     );
                 }
                 return;
@@ -474,7 +479,8 @@ export async function handleWSRequest(request, yourUUID, proxyConfig) {
                 handshake.responseHeader,
                 remoteConnWrapper,
                 yourUUID,
-                proxyConfig
+                proxyConfig,
+                resetIdleTimer
             );
         },
     })).catch((err) => {

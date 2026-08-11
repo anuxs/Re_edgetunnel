@@ -8,6 +8,7 @@ import { MD5MD5, parseUuidCredential, uuidRegex } from './utils/helpers.js';
 import { nginx, html1101, fetchMasquerade } from './utils/pages.js';
 import { parseConcurrentDialCount } from './core/dialer.js';
 import { parseSpeedTestDomains, parseSpeedTestMode } from './core/speedtest.js';
+import { parseUpstreamProxyMode } from './core/upstream-routing.js';
 import { handleGrpcRequest, handleXHttpRequest } from './core/http-tunnel.js';
 import { parseUpstreamProxy } from './protocols/upstream.js';
 import { looksLikeGrpcPayload } from './protocols/grpc.js';
@@ -51,6 +52,7 @@ export default {
             speedTestMode: parseSpeedTestMode(env.SPEEDTEST_MODE),
             speedTestDomains: parseSpeedTestDomains(env.SPEEDTEST_DOMAINS),
             upstreamProxy: parseUpstreamProxy(env.UPSTREAM_PROXY),
+            upstreamProxyMode: parseUpstreamProxyMode(env.UPSTREAM_PROXY_MODE),
             dnsResolver: env.DNS_RESOLVER ? {
                 hostname: env.DNS_RESOLVER,
                 port: Number(env.DNS_RESOLVER_PORT || 53),

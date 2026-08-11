@@ -105,7 +105,8 @@ JSON 数组保存为 Secret：
 npx wrangler secret put NODES_JSON --config workers/clash-sub/wrangler.local.toml
 ```
 
-程序会替换同名的 Cloudflare 托管节点，并拒绝重复名称。
+程序只会替换七个明确托管的 `cloudflare-*` 节点名称。`NODES_JSON` 中的其他项目
+不论服务商名称、服务器域名或协议为何，都会原样保留；重复名称仍会被拒绝。
 
 ## 使用扫描得到的 Cloudflare 优选 IP
 

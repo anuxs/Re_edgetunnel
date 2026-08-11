@@ -356,6 +356,7 @@ Guarda los datos sensibles en Cloudflare Secrets. Los valores no sensibles que v
 | `URL` | Variable, opcional | Camuflaje raíz: `nginx`, `1101` u origen HTTPS explícito |
 | `PROXYIP` | Variable o Secret | IP de respaldo elegida por el operador |
 | `UPSTREAM_PROXY` | Secret si contiene credenciales | Ascendente `socks5://`, `http://`, `https://`, `turn://`, `turns://` o `sstp://` |
+| `UPSTREAM_PROXY_MODE` | Variable | `always` (predeterminado) o enrutamiento selectivo `cloudflare` |
 | `TCP_CONCURRENT_DIAL` | Variable | Ancho de carrera directa, limitado a `1`-`4` |
 | `PROXY_CONCURRENT_DIAL` | Variable | Ancho de carrera proxy, limitado a `1`-`4` |
 | `SPEEDTEST_MODE` | Variable | `local` responde HTTP 204 local con límites; `block` cierra el túnel de prueba |
@@ -367,6 +368,12 @@ Guarda los datos sensibles en Cloudflare Secrets. Los valores no sensibles que v
 | `ALLOW_REMOTE_USAGE_API` | Variable | Debe ser `true` antes de llamar a una API remota de uso guardada |
 
 Los alias heredados `PASSWORD` y `TOKEN` siguen aceptándose para despliegues antiguos; usa `ADMIN` en instalaciones nuevas. No confirmes credenciales, ID de cuenta Cloudflare, ID de KV, dominios privados ni URL de suscripción generadas.
+
+### Enrutamiento selectivo para destinos Cloudflare
+
+Cloudflare Workers bloquea sockets TCP salientes hacia rangos IP de Cloudflare. Con `UPSTREAM_PROXY_MODE=cloudflare`, una IP literal se compara localmente con los rangos oficiales; un hostname se resuelve mediante el endpoint JSON DNS-over-HTTPS de Cloudflare y los resultados A/AAAA se almacenan en caché entre 30 segundos y una hora. Solo los destinos cuyo resultado pertenece a Cloudflare usan `UPSTREAM_PROXY`; los demás conservan la conexión directa. Si ambas consultas DNS fallan, se mantiene la ruta directa.
+
+`always` conserva el comportamiento histórico y sigue siendo el valor predeterminado. `PROXYIP` continúa como respaldo independiente. Guarda siempre una URL ascendente con credenciales como Secret de Wrangler. El endpoint ascendente debe resolverse fuera de los rangos de Cloudflare; usa un registro de solo DNS o una dirección directa que no pertenezca a Cloudflare. La instantánea incluida procede de las listas oficiales de [IPv4](https://www.cloudflare.com/ips-v4/) e [IPv6](https://www.cloudflare.com/ips-v6/). El tráfico TCP en cualquier dirección renueva un temporizador de inactividad de 15 minutos, con un límite de sesión independiente de una hora.
 
 ## Conversión opcional de suscripciones
 

@@ -356,6 +356,7 @@ IP:端口#名称,28ms
 | `URL` | 普通变量，可选 | 根路径伪装：`nginx`、`1101` 或显式 HTTPS 源站 |
 | `PROXYIP` | 普通变量或 Secret | 部署者选择的回退代理 IP |
 | `UPSTREAM_PROXY` | 带凭据时使用 Secret | `socks5://`、`http://`、`https://`、`turn://`、`turns://` 或 `sstp://` 上游 |
+| `UPSTREAM_PROXY_MODE` | 普通变量 | `always`（默认）或按 Cloudflare 目标选择的 `cloudflare` |
 | `TCP_CONCURRENT_DIAL` | 普通变量 | 直连竞速数量，限制为 `1` 到 `4` |
 | `PROXY_CONCURRENT_DIAL` | 普通变量 | 代理候选竞速数量，限制为 `1` 到 `4` |
 | `SPEEDTEST_MODE` | 普通变量 | `local` 返回有边界的本地 HTTP 204；`block` 关闭测速隧道 |
@@ -367,6 +368,25 @@ IP:端口#名称,28ms
 | `ALLOW_REMOTE_USAGE_API` | 普通变量 | 必须为 `true`，才允许调用保存在配置中的远程 Cloudflare 用量接口 |
 
 为了兼容旧部署，代码仍识别 `PASSWORD`、`TOKEN` 等后台密码别名；新部署应统一使用 `ADMIN`。不要把凭据、Cloudflare 账户 ID、KV ID、私人域名或生成后的订阅 URL 写进受 Git 跟踪的文件。
+
+### 只让 Cloudflare 目标走上游
+
+Cloudflare Workers 会阻止原始 TCP Socket 连接 Cloudflare 自有 IP 段。设置 `UPSTREAM_PROXY_MODE=cloudflare` 后，会按下面的顺序分流，不会把无关流量全部送到 VPS：
+
+1. 如果目标本身是 IP，Worker 直接在本地与 Cloudflare 公布的 IPv4、IPv6 网段匹配，不发送 DNS 请求。
+2. 如果目标是域名，Worker 通过 Cloudflare 的 JSON DNS-over-HTTPS 同时查询 A、AAAA；结果按有限制的 DNS TTL 缓存在当前 Worker isolate 中，缓存时间为 30 秒到 1 小时。
+3. 只要任一解析地址属于 Cloudflare，才使用 `UPSTREAM_PROXY`；其他目标继续调用 `cloudflare:sockets` 直连。
+4. 如果 A、AAAA 两次查询都失败，会回退到直连，不会悄悄变成全局上游。
+
+未设置该变量或设置为 `always` 时保留旧行为：所有 TCP 目标都走 `UPSTREAM_PROXY`。`PROXYIP` 仍是独立的失败回退，不会覆盖本次选择结果。带用户名、密码的上游 URL 必须保存为 Wrangler Secret：
+
+```bash
+npx wrangler secret put UPSTREAM_PROXY --config wrangler.local.toml
+```
+
+上游代理自己的域名必须解析到 Cloudflare 自有网段之外。应使用仅 DNS 解析的记录，或直接使用非 Cloudflare 地址；如果把第一跳也套上 Cloudflare 橙云，仍会落回同一个被阻止的 Socket 路径。代码内置网段快照来自 Cloudflare 官方 [IPv4](https://www.cloudflare.com/ips-v4/) 与 [IPv6](https://www.cloudflare.com/ips-v6/) 清单；更新快照时应重新核对这两个来源。只有部署者明确选择 `cloudflare` 模式时，才会执行上述 DNS 判断。
+
+对于长时间 TCP 流，任一方向有数据都会刷新 15 分钟空闲计时器；独立的一小时会话上限仍然保留。
 
 ## 可选订阅转换
 

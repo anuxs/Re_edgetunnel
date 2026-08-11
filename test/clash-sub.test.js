@@ -23,10 +23,11 @@ function environment(uuid = `\uFEFF${UUID}`) {
     };
 }
 
-test('subscription configuration strips UUID BOM and retains non-managed nodes', () => {
+test('subscription configuration strips UUID BOM and retains every non-managed node', () => {
     const config = loadConfig(environment());
     assert.equal(config.nodes[0].name, 'existing');
-    assert.equal(config.nodes.some((node) => node.name === 'old-upcloud'), false);
+    assert.equal(config.nodes[1].name, 'old-upcloud');
+    assert.equal(config.nodes[1].server, 'upcloud.example');
     const cloudflare = config.nodes.filter((node) => node.name.startsWith('cloudflare-'));
     assert.equal(cloudflare.length, 7);
     for (const node of cloudflare) {
